@@ -12,7 +12,8 @@ var SHEET_NAMES = {
   COMMUNICATION_LOG: 'Communication Log',
   SUPPRESSION_LIST: 'Suppression List',
   SETTINGS: 'Settings',
-  ERROR_LOG: 'Error Log'
+  ERROR_LOG: 'Error Log',
+  AUTO_OUTREACH_LOG: 'Auto Outreach Log'
 };
 
 // Header label -> camelCase field key, in column order. Using a
@@ -35,6 +36,7 @@ var OUTREACH_QUEUE_COLUMNS = [
   ['Offer Date', 'offerDate'],
   ['Disclosures Available', 'disclosuresAvailable'],
   ['Campaign', 'campaign'],
+  ['Redfin Link', 'redfinLink'],
   ['Status', 'status'],
   ['Qualification Reasons', 'qualificationReasons'],
   ['Do Not Automate?', 'doNotAutomate'],
@@ -74,6 +76,27 @@ var COMMUNICATION_LOG_COLUMNS = [
   ['Subject', 'subject'],
   ['Message Body', 'messageBody'],
   ['Sender', 'sender'],
+  ['Result', 'result'],
+  ['Notes', 'notes']
+];
+
+// Deliberately a separate tab from Communication Log (which records the
+// human-approved send flow). This one records auto-send activity --
+// email or SMS sent without a per-message approval click -- so the two
+// histories are never visually mixed. "Channel" is what marks the SMS
+// (text) rows the way the outreach automation request asked for.
+var AUTO_OUTREACH_LOG_COLUMNS = [
+  ['Timestamp', 'timestamp'],
+  ['Outreach Key', 'outreachKey'],
+  ['Property Address', 'propertyAddress'],
+  ['Agent Name', 'agentName'],
+  ['Agent Phone', 'agentPhone'],
+  ['Agent Email', 'agentEmail'],
+  ['Redfin Link', 'redfinLink'],
+  ['Channel', 'channel'],
+  ['Template Id', 'templateId'],
+  ['Subject', 'subject'],
+  ['Message Body', 'messageBody'],
   ['Result', 'result'],
   ['Notes', 'notes']
 ];
@@ -129,5 +152,6 @@ var FLIP_SCOUT_COLUMN_ALIASES = {
   agentEmail: ['Agent Email', 'Listing Agent Email'],
   listingStatus: ['Status', 'Listing Status'],
   daysOnMarket: ['DOM', 'Days On Market'],
-  offerDate: ['Offer Date', 'Offer Due Date']
+  offerDate: ['Offer Date', 'Offer Due Date'],
+  redfinLink: ['Redfin Link', 'Redfin URL', 'Link', 'URL']
 };

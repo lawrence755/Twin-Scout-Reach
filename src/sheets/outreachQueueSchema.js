@@ -24,6 +24,7 @@ const OUTREACH_QUEUE_HEADERS = {
   'Offer Date': 'offerDate',
   'Disclosures Available': 'disclosuresAvailable',
   'Campaign': 'campaign',
+  'Redfin Link': 'redfinLink',
   'Status': 'status',
   'Qualification Reasons': 'qualificationReasons',
   'Do Not Automate?': 'doNotAutomate',
@@ -38,4 +39,42 @@ const OUTREACH_QUEUE_HEADERS = {
   'Last Updated': 'lastUpdated'
 };
 
-module.exports = { OUTREACH_QUEUE_SHEET_NAME, OUTREACH_QUEUE_HEADERS };
+const AUTO_OUTREACH_LOG_SHEET_NAME = 'Auto Outreach Log';
+
+// Column order Node writes in when appending -- must match
+// apps-script/SheetConstants.js AUTO_OUTREACH_LOG_COLUMNS exactly,
+// since both sides append to the same tab.
+const AUTO_OUTREACH_LOG_COLUMN_ORDER = [
+  'timestamp',
+  'outreachKey',
+  'propertyAddress',
+  'agentName',
+  'agentPhone',
+  'agentEmail',
+  'redfinLink',
+  'channel',
+  'templateId',
+  'subject',
+  'messageBody',
+  'result',
+  'notes'
+];
+
+const SUPPRESSION_LIST_SHEET_NAME = 'Suppression List';
+const SUPPRESSION_LIST_HEADERS = {
+  'Contact Key': 'contactKey',
+  'Agent Phone': 'agentPhone',
+  'Agent Name': 'agentName',
+  'Reason': 'reason',
+  'Date Added': 'dateAdded',
+  'Added By': 'addedBy'
+};
+
+module.exports = {
+  OUTREACH_QUEUE_SHEET_NAME,
+  OUTREACH_QUEUE_HEADERS,
+  AUTO_OUTREACH_LOG_SHEET_NAME,
+  AUTO_OUTREACH_LOG_COLUMN_ORDER,
+  SUPPRESSION_LIST_SHEET_NAME,
+  SUPPRESSION_LIST_HEADERS
+};

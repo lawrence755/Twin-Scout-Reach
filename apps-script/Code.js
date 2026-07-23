@@ -13,6 +13,8 @@ function onOpen() {
     .addItem('Submit for approval', 'submitForApproval')
     .addItem('Approve outreach', 'approveOutreach')
     .addItem('Send approved emails', 'sendApprovedEmails')
+    .addSeparator()
+    .addItem('Auto-send eligible outreach (skips approval)', 'autoSendEligibleOutreach')
     .addToUi();
 }
 

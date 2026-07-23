@@ -9,8 +9,12 @@ Flip Scout's own scoring logic, Redfin navigation, and REI BlackBook are
 untouched -- this repo only adds a new set of tabs alongside the
 existing sheet and a Node.js/Apps Script layer on top.
 
-See `docs/PLAN.md` for the full plan this was built from, and
-`docs/ARCHITECTURE.md` for how it maps onto this codebase.
+See `docs/PLAN.md` for the full plan this was built from,
+`docs/ARCHITECTURE.md` for how it maps onto this codebase, and
+`docs/AUTO_MODE_RISKS.md` for an addendum (2026-07-23) that adds
+Redfin-based agent-contact scraping and a no-per-message-approval
+send path, on top of the original human-approval design below -- read
+that before enabling either.
 
 ## Status
 
@@ -34,16 +38,26 @@ protection, and logging -- with **all live sending disabled**.
 Before flipping either live-sending switch, resolve everything in
 `docs/OPEN_ITEMS.md`.
 
+**Addendum (2026-07-23):** Redfin agent-contact scraping
+(`src/redfin/`) and a no-per-message-approval auto-send path
+(`apps-script/AutoSend.js`, `src/voice/autoSendGoogleVoiceMessage.js`)
+were added on top of the above. They are additive and separately
+gated -- the original manual/approved path above still works
+unchanged. See `docs/AUTO_MODE_RISKS.md` for what changed, why, and
+the residual risks (Redfin ToS, Google Voice automation risk, no
+compliance review of auto-sent messages) that nothing in this repo
+mitigates.
+
 ## Layout
 
 ```
 shared/            Qualification rules, status flow, keys, template engine (Node + Apps Script)
 templates/          Versioned message content (Phase 4)
-apps-script/        Bound Apps Script project: Sheet tabs, menu, validation, Gmail send
-src/                Node.js: config, Sheets client, Playwright Google Voice prep
-tests/              node:test coverage for shared/
+apps-script/        Bound Apps Script project: Sheet tabs, menu, validation, Gmail send, auto-send
+src/                Node.js: config, Sheets client, Redfin scraper, Playwright Google Voice (prep + auto-send)
+tests/              node:test coverage for shared/ and src/redfin/
 scripts/            build-apps-script.js
-docs/               Plan, architecture, template voice guidelines, open items
+docs/               Plan, architecture, template voice guidelines, open items, auto-mode risks
 sample-data/        Example leads for exercising the rule engine locally
 ```
 
@@ -81,16 +95,28 @@ npm test
    the spreadsheet with its email, and point
    `GOOGLE_APPLICATION_CREDENTIALS` at its key file.
 4. `npm run voice:prepare` -- with automation off, this only lists which
-   `Approved` rows are ready; it does not open a browser.
+   `Approved` rows are ready; it does not open a browser. This script
+   never clicks Send under any flag; see `docs/AUTO_MODE_RISKS.md` for
+   `npm run voice:autosend`, the separate script that does.
 
 ## Safety
 
 - Two independent switches gate all live sending (Sheet `Settings` tab
   and `.env`), both default to off -- see `docs/ARCHITECTURE.md`.
-- The Google Voice script does not contain any code path that clicks
-  Send, regardless of flags. A human always reviews and sends manually.
+- `src/voice/prepareGoogleVoiceMessage.js` does not contain any code
+  path that clicks Send, regardless of flags -- a human always reviews
+  and sends manually there. `src/voice/autoSendGoogleVoiceMessage.js`
+  is a separate script that does click Send, gated by
+  `ENABLE_AUTO_SMS_SEND` (default `false`); see `docs/AUTO_MODE_RISKS.md`.
 - `refreshValidation` only auto-advances rows earlier than `Pending
   Approval` -- once a row has rendered content pending human review, it
-  won't be silently moved.
+  won't be silently moved. `autoSendEligibleOutreach` (menu item) and
+  `autoSendGoogleVoiceMessage.js` are separate, explicitly-named
+  functions that intentionally skip that gate -- see
+  `docs/AUTO_MODE_RISKS.md`.
 - Every menu action is wrapped so a thrown error lands in the `Error
   Log` tab instead of failing silently.
+- `src/redfin/scrapeRedfin.js` stops and logs on any detected
+  block/CAPTCHA page rather than attempting to get around it -- but
+  running it at all still carries a Redfin Terms of Use risk; see
+  `docs/AUTO_MODE_RISKS.md`.

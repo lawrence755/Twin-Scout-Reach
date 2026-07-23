@@ -58,6 +58,16 @@ scripts/            build-apps-script.js
 sample-data/        Example leads for exercising the rule engine locally
 ```
 
+## Auto mode addendum
+
+`src/redfin/`, `apps-script/AutoSend.js`, and
+`src/voice/autoSendGoogleVoiceMessage.js` were added after the initial
+milestone to scrape agent contact info from Redfin and to send without
+a per-message approval click. They reuse the same `shared/` rule
+engine and log to a new `Auto Outreach Log` tab (kept separate from
+`Communication Log`, which records the human-approved flow). See
+`docs/AUTO_MODE_RISKS.md` for why this exists and what it costs.
+
 ## Safety layers
 
 Two independent switches gate live sending, both default to off:

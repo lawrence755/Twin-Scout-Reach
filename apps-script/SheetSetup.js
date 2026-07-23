@@ -10,6 +10,7 @@ function setupOutreachSheets() {
   ensureSheetWithHeaders_(ss, SHEET_NAMES.COMMUNICATION_LOG, columnLabels_(COMMUNICATION_LOG_COLUMNS));
   ensureSheetWithHeaders_(ss, SHEET_NAMES.SUPPRESSION_LIST, columnLabels_(SUPPRESSION_LIST_COLUMNS));
   ensureSheetWithHeaders_(ss, SHEET_NAMES.ERROR_LOG, columnLabels_(ERROR_LOG_COLUMNS));
+  ensureSheetWithHeaders_(ss, SHEET_NAMES.AUTO_OUTREACH_LOG, columnLabels_(AUTO_OUTREACH_LOG_COLUMNS));
 
   var settingsSheet = ensureSheetWithHeaders_(ss, SHEET_NAMES.SETTINGS, columnLabels_(SETTINGS_COLUMNS));
   seedDefaultSettings_(settingsSheet);

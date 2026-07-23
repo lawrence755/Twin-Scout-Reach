@@ -6,7 +6,9 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "build:apps-script": "node scripts/build-apps-script.js",
-    "voice:prepare": "node src/voice/prepareGoogleVoiceMessage.js"
+    "voice:prepare": "node src/voice/prepareGoogleVoiceMessage.js",
+    "voice:autosend": "node src/voice/autoSendGoogleVoiceMessage.js",
+    "redfin:enrich": "node src/redfin/enrichAgentContacts.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

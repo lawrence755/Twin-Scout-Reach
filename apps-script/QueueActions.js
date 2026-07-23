@@ -65,6 +65,7 @@ function addSelectedFlipScoutRows() {
         lead.offerDate,
         '', // Disclosures Available -- verified manually
         campaign,
+        lead.redfinLink,
         'Information Needed',
         'Added from Flip Scout Leads row ' + r + '. Complete manual verification fields, then Refresh Validation.',
         false,
