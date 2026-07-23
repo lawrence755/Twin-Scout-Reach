@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Twin Home Buyer Outreach Control Panel</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Outreach Control Panel</h1>
+    <button id="open-sheet-btn" class="link-btn">Open Spreadsheet ↗</button>
+  </header>
+
+  <section id="flags-panel" class="panel">
+    <div class="flag" id="flag-voice">
+      <span class="dot"></span>
+      <span class="flag-label">ENABLE_VOICE_AUTOMATION</span>
+      <span class="flag-value">loading…</span>
+    </div>
+    <div class="flag" id="flag-autosend">
+      <span class="dot"></span>
+      <span class="flag-label">ENABLE_AUTO_SMS_SEND</span>
+      <span class="flag-value">loading…</span>
+    </div>
+  </section>
+
+  <section class="panel actions">
+    <button data-job="redfin-enrich" class="job-btn">Enrich agent contacts (Redfin)</button>
+    <button data-job="voice-prepare" class="job-btn">Prepare Google Voice texts<br><small>stops before Send</small></button>
+    <button data-job="build-apps-script" class="job-btn">Rebuild Apps Script files</button>
+
+    <div class="danger-box">
+      <label>
+        <input type="checkbox" id="autosend-confirm" />
+        I understand this sends real texts immediately, with no review.
+      </label>
+      <button data-job="voice-autosend" class="job-btn danger" id="autosend-btn" disabled>
+        Auto-send Google Voice texts<br><small>clicks Send -- no confirmation</small>
+      </button>
+    </div>
+
+    <button id="stop-btn" class="stop-btn" disabled>Stop current job</button>
+  </section>
+
+  <section class="panel log-panel">
+    <div id="log"></div>
+    <div class="input-row">
+      <input id="input-box" type="text" placeholder="Type a reply (e.g. sent / skip / reject) and press Enter" disabled />
+      <button id="send-input-btn" disabled>Send</button>
+    </div>
+  </section>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
