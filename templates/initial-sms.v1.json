@@ -1,0 +1,8 @@
+{
+  "id": "initial-sms",
+  "channel": "sms",
+  "version": 1,
+  "sequencePosition": 1,
+  "body": "Hi {{agentFirstName}}, this is {{senderName}} with {{companyWebsite}} -- we buy homes directly in the Bay Area and noticed {{propertyAddress}} in {{city}}. Would your seller be open to a direct, as-is offer alongside anything else on the table? Reply YES if you'd like details, or NO if it's not a fit.",
+  "requiredFields": ["agentFirstName", "senderName", "companyWebsite", "propertyAddress", "city"]
+}

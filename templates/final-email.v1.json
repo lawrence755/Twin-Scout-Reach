@@ -1,0 +1,17 @@
+{
+  "id": "final-email",
+  "channel": "email",
+  "version": 1,
+  "sequencePosition": 3,
+  "subject": "Last note on {{propertyAddress}}",
+  "body": "Hi {{agentFirstName}},\n\nThis will be my last note on {{propertyAddress}} unless I hear back. If your seller's situation changes down the road, feel free to reach out -- {{senderPhone}} or {{senderEmail}}.\n\nIf you ever have other Bay Area listings where a seller might want a direct, as-is offer, {{handoffPerson}} on our team is also a good contact.\n\nThanks again for your time,\n{{senderName}}\n{{companyWebsite}}",
+  "requiredFields": [
+    "agentFirstName",
+    "propertyAddress",
+    "senderPhone",
+    "senderEmail",
+    "handoffPerson",
+    "senderName",
+    "companyWebsite"
+  ]
+}

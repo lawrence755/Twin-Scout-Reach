@@ -1,0 +1,8 @@
+{
+  "id": "followup-sms",
+  "channel": "sms",
+  "version": 1,
+  "sequencePosition": 2,
+  "body": "Hi {{agentFirstName}}, following up on {{propertyAddress}} in {{city}}. Still checking whether your seller has interest in a direct offer -- no pressure either way. Reply YES to keep talking or NO and I'll close this out. -- {{senderName}}",
+  "requiredFields": ["agentFirstName", "propertyAddress", "city", "senderName"]
+}

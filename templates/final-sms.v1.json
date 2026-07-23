@@ -1,0 +1,8 @@
+{
+  "id": "final-sms",
+  "channel": "sms",
+  "version": 1,
+  "sequencePosition": 3,
+  "body": "Hi {{agentFirstName}}, last check-in on {{propertyAddress}}. If now isn't the right time, no problem -- reply NO and I'll stop here. If you'd like to talk it through, reply YES. Thanks for your time. -- {{senderName}}, {{companyWebsite}}",
+  "requiredFields": ["agentFirstName", "propertyAddress", "senderName", "companyWebsite"]
+}

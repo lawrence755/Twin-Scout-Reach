@@ -1,0 +1,9 @@
+{
+  "id": "followup-email",
+  "channel": "email",
+  "version": 1,
+  "sequencePosition": 2,
+  "subject": "Following up: {{propertyAddress}}",
+  "body": "Hi {{agentFirstName}},\n\nWanted to follow up on my note about {{propertyAddress}} in {{city}}. If your seller has already accepted an offer or isn't interested in a direct sale, that's completely fine -- just let me know and I'll close this out on my end.\n\nIf it's still open, I'm happy to answer any questions about how we work.\n\nThanks,\n{{senderName}}\n{{senderPhone}}\n{{senderEmail}}",
+  "requiredFields": ["agentFirstName", "propertyAddress", "city", "senderName", "senderPhone", "senderEmail"]
+}

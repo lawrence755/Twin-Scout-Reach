@@ -1,0 +1,19 @@
+{
+  "id": "initial-email",
+  "channel": "email",
+  "version": 1,
+  "sequencePosition": 1,
+  "subject": "Interest in {{propertyAddress}}, {{city}}",
+  "body": "Hi {{agentFirstName}},\n\nMy name is {{senderName}} with {{companyWebsite}}. We're a local Bay Area home buying company, and I came across your listing at {{propertyAddress}} in {{city}}.\n\nWe work directly with homeowners who want a straightforward, as-is sale, and I wanted to check whether your seller would be open to discussing a direct offer alongside anything else you're currently evaluating.\n\nWe've been buying homes in the Bay Area for {{yearsInBusiness}}, and you can see feedback from past sellers here: {{googleReviewLink}}.\n\nIf this could be useful for your seller, I'd welcome a short call. If not, no problem at all -- just let me know and I won't follow up further.\n\nThanks for your time,\n{{senderName}}\n{{senderPhone}}\n{{senderEmail}}\n{{companyWebsite}}",
+  "requiredFields": [
+    "agentFirstName",
+    "senderName",
+    "companyWebsite",
+    "propertyAddress",
+    "city",
+    "yearsInBusiness",
+    "googleReviewLink",
+    "senderPhone",
+    "senderEmail"
+  ]
+}
