@@ -74,16 +74,23 @@ npm test
 
 ### Apps Script (Sheet outreach layer)
 
-1. Install `clasp` and log in: `npm install -g @google/clasp && clasp login`.
-2. Create or open the Apps Script project bound to the `Flip Scout Leads`
-   spreadsheet, and put its script ID in `apps-script/.clasp.json`
-   (gitignored -- copy from `clasp create --parentId <spreadsheet-id>`
-   if the project doesn't exist yet).
-3. Run `npm run build:apps-script` to copy `shared/*.js` into
+`clasp login` requires a normal OAuth browser flow, which does not
+work from a network-sandboxed remote session (Google's auth endpoints
+get blocked at the network layer there) -- run this section from a
+machine with regular internet access.
+
+1. Open the actual spreadsheet -> **Extensions -> Apps Script**. This
+   creates a bound script project (or opens the existing one).
+2. In that project's **Project Settings**, copy the Script ID.
+3. `npm install -g @google/clasp && clasp login` (normal browser login).
+4. `npm run build:apps-script` to copy `shared/*.js` into
    `apps-script/shared/` and regenerate `apps-script/Templates.js` from
    `templates/*.json`.
-4. `cd apps-script && clasp push`.
-5. Reload the spreadsheet. Use the new **Outreach** menu -> **Set up
+5. Point `apps-script/.clasp.json` (gitignored) at that Script ID --
+   either `clasp clone <script-id> --rootDir ./apps-script`, or write
+   `{"scriptId": "<script-id>", "rootDir": "."}` by hand.
+6. `cd apps-script && clasp push`.
+7. Reload the spreadsheet. Use the new **Outreach** menu -> **Set up
    outreach tabs** first, then fill in the `Settings` tab.
 
 ### Node.js (Sheets client + Google Voice prep)
