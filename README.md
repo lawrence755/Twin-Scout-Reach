@@ -79,6 +79,16 @@ work from a network-sandboxed remote session (Google's auth endpoints
 get blocked at the network layer there) -- run this section from a
 machine with regular internet access.
 
+**If the target spreadsheet already has a bound script** (check
+Extensions -> Apps Script -> the file list on the left): copy its
+existing code into this repo under its own filename before doing
+anything else, so `clasp push` (which replaces the *entire* remote
+file set) doesn't delete it. This repo already does that for Bryan's
+`FlipScoutSheet.js` -- if there's other code there too, add it the same
+way and make sure it doesn't define a second top-level `onOpen()` (see
+the comment above `buildOutreachMenu_()` in `Code.js` for why that
+collides silently).
+
 1. Open the actual spreadsheet -> **Extensions -> Apps Script**. This
    creates a bound script project (or opens the existing one).
 2. In that project's **Project Settings**, copy the Script ID.
@@ -89,9 +99,18 @@ machine with regular internet access.
 5. Point `apps-script/.clasp.json` (gitignored) at that Script ID --
    either `clasp clone <script-id> --rootDir ./apps-script`, or write
    `{"scriptId": "<script-id>", "rootDir": "."}` by hand.
-6. `cd apps-script && clasp push`.
-7. Reload the spreadsheet. Use the new **Outreach** menu -> **Set up
-   outreach tabs** first, then fill in the `Settings` tab.
+6. `cd apps-script && clasp push`. `appsscript.json` now lists explicit
+   `oauthScopes` (added for Bryan's `UrlFetchApp`/trigger calls) --
+   expect a fresh Google consent screen on the next run of anything in
+   the project, even functions that already ran before.
+7. In the Apps Script editor's function dropdown (top toolbar, next to
+   Run), select `setupOutreachSheets` and click **Run** once -- this
+   creates the outreach tabs *and* installs the Outreach menu (as an
+   installable trigger, so it doesn't collide with Bryan's own
+   `onOpen()`). Approve the consent screen when prompted.
+8. Reload the spreadsheet. Both the **Flip Scout** and **Outreach**
+   menus should now appear, and Bryan's hourly refresh/KPI/rejected-leads
+   logic should behave exactly as before. Fill in the `Settings` tab.
 
 ### Node.js (Sheets client + Google Voice prep)
 

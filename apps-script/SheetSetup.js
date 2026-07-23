@@ -15,7 +15,15 @@ function setupOutreachSheets() {
   var settingsSheet = ensureSheetWithHeaders_(ss, SHEET_NAMES.SETTINGS, columnLabels_(SETTINGS_COLUMNS));
   seedDefaultSettings_(settingsSheet);
 
-  SpreadsheetApp.getUi().alert('Outreach tabs are set up. Flip Scout Leads was not modified.');
+  // Wires up the Outreach menu as an installable onOpen trigger so it
+  // coexists with Bryan's own onOpen() in FlipScoutSheet.js -- see the
+  // comment above buildOutreachMenu_() in Code.js. Run this function
+  // once manually (via the Apps Script editor's function dropdown, not
+  // a menu -- the menu doesn't exist until this runs) to bootstrap it.
+  installOutreachMenuTrigger_();
+  buildOutreachMenu_();
+
+  SpreadsheetApp.getUi().alert('Outreach tabs are set up and the Outreach menu is now installed. Flip Scout Leads and its menu/triggers were not modified.');
 }
 
 function columnLabels_(columnDefs) {

@@ -2,8 +2,20 @@
  * Menu wiring and small cross-cutting helpers (Settings lookups, error
  * logging, sheet-row <-> object mapping) shared by QueueActions.js and
  * GmailSender.js.
+ *
+ * This project also contains Bryan's existing FlipScoutSheet.js, which
+ * defines its own function onOpen() (the "Flip Scout" menu). Apps
+ * Script only runs one function literally named onOpen -- a second
+ * top-level onOpen() here would silently make one of the two menus
+ * stop appearing, with no error. So the Outreach menu is NOT built via
+ * onOpen(); it's built by buildOutreachMenu_() below, wired up as an
+ * independent *installable* onOpen trigger (installOutreachMenuTrigger_,
+ * called by setupOutreachSheets()). Apps Script fires every installable
+ * onOpen trigger in a project alongside the one simple onOpen() function,
+ * so both menus appear on every sheet load without either file touching
+ * the other.
  */
-function onOpen() {
+function buildOutreachMenu_() {
   SpreadsheetApp.getUi()
     .createMenu('Outreach')
     .addItem('Set up outreach tabs', 'setupOutreachSheets')
@@ -16,6 +28,24 @@ function onOpen() {
     .addSeparator()
     .addItem('Auto-send eligible outreach (skips approval)', 'autoSendEligibleOutreach')
     .addToUi();
+}
+
+/**
+ * Idempotent, like Bryan's enableHourlyTrigger() -- safe to call every
+ * time setupOutreachSheets() runs. Must be run once manually the very
+ * first time (select installOutreachMenuTrigger_ or setupOutreachSheets
+ * in the Apps Script editor's function dropdown and click Run), since
+ * before it exists there's no menu item to click.
+ */
+function installOutreachMenuTrigger_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'buildOutreachMenu_') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('buildOutreachMenu_').forSpreadsheet(ss).onOpen().create();
 }
 
 /**
