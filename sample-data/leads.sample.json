@@ -1,0 +1,44 @@
+[
+  {
+    "note": "Should qualify as Ready for Drafting",
+    "lead": {
+      "listingStatus": "Active",
+      "daysOnMarket": 12,
+      "tenantOccupied": false,
+      "needsWork": true,
+      "appearsRenovated": false,
+      "compReviewCompleted": true,
+      "agentName": "Maria Chen",
+      "agentPhone": "(510) 555-0142",
+      "agentEmail": "maria.chen@example-realty.com"
+    }
+  },
+  {
+    "note": "Should be Rejected: tenant occupied and over the DOM limit",
+    "lead": {
+      "listingStatus": "Active",
+      "daysOnMarket": 61,
+      "tenantOccupied": true,
+      "needsWork": true,
+      "appearsRenovated": false,
+      "compReviewCompleted": true,
+      "agentName": "Dave Torres",
+      "agentPhone": "(415) 555-0199",
+      "agentEmail": ""
+    }
+  },
+  {
+    "note": "Should be Needs Review: comp review and agent phone missing",
+    "lead": {
+      "listingStatus": "Active",
+      "daysOnMarket": 20,
+      "tenantOccupied": false,
+      "needsWork": true,
+      "appearsRenovated": false,
+      "compReviewCompleted": "",
+      "agentName": "Priya Patel",
+      "agentPhone": "",
+      "agentEmail": ""
+    }
+  }
+]

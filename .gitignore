@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.local
+credentials.json
+service-account.json
+.clasp.json
+.clasprc.json
+playwright-report/
+test-results/
+*.log
+.DS_Store
+apps-script/shared/*.js
+.claude/settings.local.json
