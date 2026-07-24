@@ -109,6 +109,33 @@ async function updateOutreachQueueRow(rowNumber, fields) {
 }
 
 /**
+ * Appends a new row to Outreach Queue, mapping camelCase keys (per
+ * OUTREACH_QUEUE_HEADERS) to whichever columns actually exist, in
+ * whatever order they're in -- so this stays correct even if columns
+ * get reordered in the Sheet.
+ */
+async function appendOutreachQueueRow(fields) {
+  requireSheetId();
+  const sheets = await getSheetsClient();
+  const headerRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_QUEUE_SHEET_NAME}'!1:1`
+  });
+  const headerRow = headerRes.data.values[0];
+  const row = headerRow.map((label) => {
+    const key = OUTREACH_QUEUE_HEADERS[label];
+    return key && fields[key] !== undefined ? fields[key] : '';
+  });
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_QUEUE_SHEET_NAME}'`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [row] }
+  });
+}
+
+/**
  * Writes the human operator's confirmed outcome for one SMS record
  * back to the sheet (Phase 7, step 9).
  */
@@ -163,6 +190,7 @@ module.exports = {
   getOutreachQueueRows,
   getApprovedSmsRows,
   updateOutreachQueueRow,
+  appendOutreachQueueRow,
   writeVoiceOutcome,
   appendAutoOutreachLog,
   getSuppressionList

@@ -24,6 +24,37 @@
     </div>
   </section>
 
+  <section class="panel outreach-panel">
+    <h2>Outreach Queue</h2>
+    <form id="add-row-form" class="add-row-form">
+      <input name="propertyAddress" placeholder="Property Address" required />
+      <input name="city" placeholder="City" required />
+      <input name="agentName" placeholder="Agent Name" required />
+      <input name="agentPhone" placeholder="Agent Phone" required />
+      <input name="agentEmail" placeholder="Agent Email (optional)" />
+      <input name="listingStatus" placeholder="Listing Status" value="Active" />
+      <input name="daysOnMarket" placeholder="Days On Market" type="number" value="10" />
+      <input name="campaign" placeholder="Campaign" value="internal-test" />
+      <label><input type="checkbox" name="tenantOccupied" /> Tenant Occupied</label>
+      <label><input type="checkbox" name="needsWork" checked /> Needs Work</label>
+      <label><input type="checkbox" name="appearsRenovated" /> Appears Renovated</label>
+      <label><input type="checkbox" name="compReviewCompleted" checked /> Comp Review Completed</label>
+      <button type="submit" id="add-row-btn">Add Row</button>
+    </form>
+    <div class="outreach-actions">
+      <button id="refresh-validation-btn">Refresh validation</button>
+      <button id="submit-approval-btn">Submit for approval</button>
+      <button id="approve-btn">Approve outreach</button>
+      <span class="note">Gmail sending still happens in the Sheet (Outreach menu -&gt; Send approved emails).</span>
+    </div>
+    <div class="outreach-table-wrap">
+      <table id="outreach-table">
+        <thead><tr><th>Row</th><th>Address</th><th>Status</th><th>Agent Phone</th><th>Agent Email</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="panel actions">
     <button data-job="redfin-enrich" class="job-btn">Enrich agent contacts (Redfin)</button>
     <button data-job="voice-prepare" class="job-btn">Prepare Google Voice texts<br><small>stops before Send</small></button>

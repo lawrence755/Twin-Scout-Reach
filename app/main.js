@@ -7,6 +7,7 @@ const path = require('path');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const { JobRunner, readEnvFlags } = require('./jobRunner');
+const outreachActions = require('../src/sheets/outreachActions');
 
 const runner = new JobRunner();
 let mainWindow;
@@ -67,6 +68,47 @@ ipcMain.handle('stop-job', () => {
 ipcMain.handle('open-sheet', () => {
   const id = process.env.GOOGLE_SHEET_ID;
   if (id) shell.openExternal('https://docs.google.com/spreadsheets/d/' + id + '/edit');
+});
+
+ipcMain.handle('outreach:add-row', async (_event, fields) => {
+  try {
+    await outreachActions.addRow(fields);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('outreach:refresh-validation', async () => {
+  try {
+    return { ok: true, results: await outreachActions.refreshValidation() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('outreach:submit-for-approval', async () => {
+  try {
+    return { ok: true, results: await outreachActions.submitForApproval() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('outreach:approve', async () => {
+  try {
+    return { ok: true, results: await outreachActions.approveOutreach() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('outreach:list-rows', async () => {
+  try {
+    return { ok: true, rows: await outreachActions.listRows() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 app.whenReady().then(createWindow);

@@ -11,6 +11,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { JobRunner, readEnvFlags } = require('./jobRunner');
+const outreachActions = require('../src/sheets/outreachActions');
 
 const PORT = Number(process.env.APP_PORT || 4747);
 const runner = new JobRunner();
@@ -111,6 +112,36 @@ const server = http.createServer(async (req, res) => {
     runner.stop();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  const outreachRoutes = {
+    '/outreach/add-row': (body) => outreachActions.addRow(body).then(() => ({})),
+    '/outreach/refresh-validation': () => outreachActions.refreshValidation().then((results) => ({ results })),
+    '/outreach/submit-for-approval': () => outreachActions.submitForApproval().then((results) => ({ results })),
+    '/outreach/approve': () => outreachActions.approveOutreach().then((results) => ({ results }))
+  };
+  if (req.method === 'POST' && outreachRoutes[url.pathname]) {
+    try {
+      const body = await readJsonBody(req);
+      const payload = await outreachRoutes[url.pathname](body);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, ...payload }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/outreach/rows') {
+    try {
+      const rows = await outreachActions.listRows();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, rows }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
     return;
   }
 

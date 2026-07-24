@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld('outreachApi', {
   sendInput: (text) => ipcRenderer.invoke('send-input', text),
   stopJob: () => ipcRenderer.invoke('stop-job'),
   openSheet: () => ipcRenderer.invoke('open-sheet'),
+  addOutreachRow: (fields) => ipcRenderer.invoke('outreach:add-row', fields),
+  refreshValidation: () => ipcRenderer.invoke('outreach:refresh-validation'),
+  submitForApproval: () => ipcRenderer.invoke('outreach:submit-for-approval'),
+  approveOutreach: () => ipcRenderer.invoke('outreach:approve'),
+  listOutreachRows: () => ipcRenderer.invoke('outreach:list-rows'),
   onLog: (cb) => ipcRenderer.on('log', (_event, payload) => cb(payload)),
   onJobStarted: (cb) => ipcRenderer.on('job-started', (_event, payload) => cb(payload)),
   onJobFinished: (cb) => ipcRenderer.on('job-finished', (_event, payload) => cb(payload))

@@ -54,7 +54,8 @@ mitigates.
 shared/            Qualification rules, status flow, keys, template engine (Node + Apps Script)
 templates/          Versioned message content (Phase 4)
 apps-script/        Bound Apps Script project: Sheet tabs, menu, validation, Gmail send, auto-send
-src/                Node.js: config, Sheets client, Redfin scraper, Playwright Google Voice (prep + auto-send)
+src/                Node.js: config, Sheets client, Outreach Queue actions, Redfin scraper, Playwright Google Voice (prep + auto-send)
+app/                Electron control panel (graphical, no terminal) -- add/validate/submit/approve rows, run Redfin/Voice jobs
 tests/              node:test coverage for shared/ and src/redfin/
 scripts/            build-apps-script.js
 docs/               Plan, architecture, template voice guidelines, open items, auto-mode risks
@@ -111,6 +112,28 @@ collides silently).
 8. Reload the spreadsheet. Both the **Flip Scout** and **Outreach**
    menus should now appear, and Bryan's hourly refresh/KPI/rejected-leads
    logic should behave exactly as before. Fill in the `Settings` tab.
+
+### Desktop control panel (`app/`)
+
+A graphical, no-terminal front end for the Node side, plus an
+Outreach Queue panel that mirrors most of the Apps Script menu so you
+rarely need to switch to the Sheet.
+
+- `npm run app` -- runs it as an Electron window (recommended).
+- `npm run app:web` -- runs it as a local web page instead (`http://127.0.0.1:4747`), same functionality, no Electron build needed.
+- `npm run dist:win` -- packages it into a standalone `.exe` (see `docs/ARCHITECTURE.md` for the packaging notes -- Windows needs an elevated shell and `CSC_IDENTITY_AUTO_DISCOVERY=false` the first time, to skip an irrelevant code-signing download that needs symlink privileges).
+
+What it can do:
+- **Add a row** to Outreach Queue (real lead or an internal test row) via a form.
+- **Refresh validation / Submit for approval / Approve outreach** -- Node-side equivalents of those same Apps Script menu items, reusing the identical `shared/` rule engine.
+- **Enrich agent contacts (Redfin)**, **Prepare/Auto-send Google Voice texts**, **Rebuild Apps Script files** -- same jobs as before.
+- A live table of current Outreach Queue rows.
+
+What it deliberately does **not** do: send Gmail. `GmailApp` in Apps
+Script needs no separate OAuth setup; doing the same from Node would
+require a whole new Gmail API OAuth flow, which wasn't worth building
+for this pass. Click **Open Spreadsheet** in the app and use **Send
+approved emails** there for that one step.
 
 ### Node.js (Sheets client + Google Voice prep)
 

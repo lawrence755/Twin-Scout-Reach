@@ -95,3 +95,16 @@ button small { color: var(--muted); font-weight: normal; }
 
 .input-row { display: flex; gap: 8px; margin-top: 8px; }
 .input-row input { flex: 1; background: #0f1115; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+
+.outreach-panel h2 { margin: 0 0 10px; font-size: 1rem; }
+.add-row-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.add-row-form input[type="text"], .add-row-form input:not([type]), .add-row-form input[type="number"] {
+  background: #0f1115; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 0.85rem;
+}
+.add-row-form label { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.outreach-actions { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.outreach-actions .note { font-size: 0.75rem; color: var(--muted); }
+.outreach-table-wrap { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+#outreach-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+#outreach-table th, #outreach-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+#outreach-table th { color: var(--muted); position: sticky; top: 0; background: var(--panel); }
