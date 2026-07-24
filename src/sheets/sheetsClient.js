@@ -14,7 +14,10 @@ const {
   AUTO_OUTREACH_LOG_SHEET_NAME,
   AUTO_OUTREACH_LOG_COLUMN_ORDER,
   SUPPRESSION_LIST_SHEET_NAME,
-  SUPPRESSION_LIST_HEADERS
+  SUPPRESSION_LIST_HEADERS,
+  SETTINGS_SHEET_NAME,
+  COMMUNICATION_LOG_SHEET_NAME,
+  COMMUNICATION_LOG_COLUMN_ORDER
 } = require('./outreachQueueSchema');
 
 async function getSheetsClient() {
@@ -186,6 +189,44 @@ async function getSuppressionList() {
   });
 }
 
+/**
+ * Reads the Settings tab into a plain { [key]: value } object -- the
+ * same tab and shape Apps Script's getSettings_() reads, so the
+ * "Enable Email Sending" switch has exactly one source of truth
+ * regardless of which side (Sheet menu or this app) is sending.
+ */
+async function getSettings() {
+  requireSheetId();
+  const sheets = await getSheetsClient();
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${SETTINGS_SHEET_NAME}'`
+  });
+  const [, ...dataRows] = data.values || [[]];
+  const settings = {};
+  dataRows.forEach((row) => {
+    if (row[0]) settings[row[0]] = row[1] || '';
+  });
+  return settings;
+}
+
+/**
+ * Appends one row to Communication Log -- the human-approved send
+ * history, kept separate from Auto Outreach Log.
+ */
+async function appendCommunicationLog(fields) {
+  requireSheetId();
+  const sheets = await getSheetsClient();
+  const row = COMMUNICATION_LOG_COLUMN_ORDER.map((key) => (fields[key] !== undefined ? fields[key] : ''));
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${COMMUNICATION_LOG_SHEET_NAME}'`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [row] }
+  });
+}
+
 module.exports = {
   getOutreachQueueRows,
   getApprovedSmsRows,
@@ -193,5 +234,7 @@ module.exports = {
   appendOutreachQueueRow,
   writeVoiceOutcome,
   appendAutoOutreachLog,
-  getSuppressionList
+  getSuppressionList,
+  getSettings,
+  appendCommunicationLog
 };

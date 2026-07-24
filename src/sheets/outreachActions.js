@@ -14,15 +14,18 @@ const config = require('../config');
 const { evaluateQualification } = require('../../shared/qualification');
 const { isSuppressed, buildOutreachKey, buildContactKey } = require('../../shared/keys');
 const { canTransition } = require('../../shared/statusFlow');
-const { renderTemplate } = require('../../shared/templateEngine');
+const { renderTemplate, extractMergeFields } = require('../../shared/templateEngine');
 const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
 const initialEmailTemplate = require('../../templates/initial-email.v1.json');
 const {
   getOutreachQueueRows,
   updateOutreachQueueRow,
   appendOutreachQueueRow,
-  getSuppressionList
+  getSuppressionList,
+  getSettings,
+  appendCommunicationLog
 } = require('./sheetsClient');
+const gmailClient = require('../gmail/gmailClient');
 
 const PRE_APPROVAL_STATUSES = ['Information Needed', 'Needs Review', 'Ready for Drafting'];
 
@@ -162,6 +165,81 @@ async function approveOutreach() {
   return results;
 }
 
+function isTruthySetting(value) {
+  return String(value || '').trim().toUpperCase() === 'TRUE';
+}
+
+/**
+ * Node-side equivalent of the "Send approved emails" menu item, using
+ * the Gmail API (src/gmail/gmailClient.js) instead of GmailApp.
+ *
+ * Two independent gates, both must be true to actually send -- the
+ * Sheet's "Enable Email Sending" switch (the same one Apps Script
+ * reads, so there's one source of truth for intent) AND the .env
+ * ENABLE_EMAIL_SENDING flag (Node-only, matches how ENABLE_VOICE_AUTOMATION
+ * already works as a second independent layer). Either one being off
+ * means dry-run only. Every other safety check re-runs immediately
+ * before sending, same as the Apps Script version.
+ */
+async function sendApprovedEmails() {
+  const settings = await getSettings();
+  const sendingEnabled = isTruthySetting(settings['Enable Email Sending']) && config.flags.emailSendingEnabled;
+  const suppressionList = await getSuppressionList();
+  const rows = await getOutreachQueueRows(
+    (r) => r.status === 'Approved' && r.agentEmail && r.renderedEmailBody
+  );
+
+  const results = [];
+  for (const row of rows) {
+    const problems = [];
+    if (coerceBoolean(row.doNotAutomate)) problems.push('Do Not Automate is set.');
+    if (isSuppressed(row.agentPhone, suppressionList)) problems.push('Agent is on the Suppression List.');
+    if (extractMergeFields(row.renderedEmailSubject).length > 0 || extractMergeFields(row.renderedEmailBody).length > 0) {
+      problems.push('Rendered email still has unresolved merge fields.');
+    }
+
+    if (problems.length > 0) {
+      await updateOutreachQueueRow(row.__rowNumber, {
+        status: 'Needs Review',
+        qualificationReasons: problems.join(' '),
+        lastUpdated: new Date().toISOString()
+      });
+      await appendCommunicationLog({
+        timestamp: new Date().toISOString(), outreachKey: row.outreachKey, contactKey: row.contactKey,
+        propertyAddress: row.propertyAddress, agentName: row.agentName, agentPhone: row.agentPhone,
+        agentEmail: row.agentEmail, channel: 'email', templateId: row.emailTemplateId, templateVersion: row.emailTemplateId,
+        subject: row.renderedEmailSubject, messageBody: row.renderedEmailBody, sender: config.sender.email,
+        result: 'Blocked', notes: problems.join(' ')
+      });
+      results.push({ row: row.__rowNumber, address: row.propertyAddress, result: 'Blocked', notes: problems.join(' ') });
+      continue;
+    }
+
+    if (sendingEnabled) {
+      await gmailClient.sendEmail({ to: row.agentEmail, subject: row.renderedEmailSubject, body: row.renderedEmailBody });
+      await updateOutreachQueueRow(row.__rowNumber, { status: 'Contacted', lastUpdated: new Date().toISOString() });
+      await appendCommunicationLog({
+        timestamp: new Date().toISOString(), outreachKey: row.outreachKey, contactKey: row.contactKey,
+        propertyAddress: row.propertyAddress, agentName: row.agentName, agentPhone: row.agentPhone,
+        agentEmail: row.agentEmail, channel: 'email', templateId: row.emailTemplateId, templateVersion: row.emailTemplateId,
+        subject: row.renderedEmailSubject, messageBody: row.renderedEmailBody, sender: config.sender.email,
+        result: 'Sent', notes: ''
+      });
+      results.push({ row: row.__rowNumber, address: row.propertyAddress, result: 'Sent' });
+    } else {
+      await appendCommunicationLog({
+        timestamp: new Date().toISOString(), outreachKey: row.outreachKey, contactKey: row.contactKey,
+        propertyAddress: row.propertyAddress, agentName: row.agentName, agentPhone: row.agentPhone,
+        agentEmail: row.agentEmail, channel: 'email', templateId: row.emailTemplateId, templateVersion: row.emailTemplateId,
+        subject: row.renderedEmailSubject, messageBody: row.renderedEmailBody, sender: config.sender.email,
+        result: 'Dry Run', notes: 'Enable Email Sending is FALSE in the Settings tab -- no message was actually sent.'
+      });
+      results.push({ row: row.__rowNumber, address: row.propertyAddress, result: 'Dry Run' });
+    }
+  }
+  return { sendingEnabled, results };
+}
+
 async function listRows() {
   const rows = await getOutreachQueueRows();
   return rows.map((r) => ({
@@ -173,4 +251,4 @@ async function listRows() {
   }));
 }
 
-module.exports = { addRow, refreshValidation, submitForApproval, approveOutreach, listRows };
+module.exports = { addRow, refreshValidation, submitForApproval, approveOutreach, sendApprovedEmails, listRows };

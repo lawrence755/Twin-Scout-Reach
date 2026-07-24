@@ -103,6 +103,15 @@ ipcMain.handle('outreach:approve', async () => {
   }
 });
 
+ipcMain.handle('outreach:send-emails', async () => {
+  try {
+    const { sendingEnabled, results } = await outreachActions.sendApprovedEmails();
+    return { ok: true, sendingEnabled, results };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('outreach:list-rows', async () => {
   try {
     return { ok: true, rows: await outreachActions.listRows() };

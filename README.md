@@ -126,14 +126,17 @@ rarely need to switch to the Sheet.
 What it can do:
 - **Add a row** to Outreach Queue (real lead or an internal test row) via a form.
 - **Refresh validation / Submit for approval / Approve outreach** -- Node-side equivalents of those same Apps Script menu items, reusing the identical `shared/` rule engine.
+- **Send approved emails** -- via the Gmail API (see one-time setup below), not `GmailApp`. Reads the exact same `Enable Email Sending` switch on the Settings tab that Apps Script reads, plus a second independent `.env` gate (`ENABLE_EMAIL_SENDING`) -- both must be `true` to actually send; either one off means a dry run logged to Communication Log.
 - **Enrich agent contacts (Redfin)**, **Prepare/Auto-send Google Voice texts**, **Rebuild Apps Script files** -- same jobs as before.
 - A live table of current Outreach Queue rows.
 
-What it deliberately does **not** do: send Gmail. `GmailApp` in Apps
-Script needs no separate OAuth setup; doing the same from Node would
-require a whole new Gmail API OAuth flow, which wasn't worth building
-for this pass. Click **Open Spreadsheet** in the app and use **Send
-approved emails** there for that one step.
+#### One-time Gmail setup
+
+1. In the same (or a new) Google Cloud project as your Sheets service account: enable the **Gmail API**.
+2. **APIs & Services -> Credentials -> Create Credentials -> OAuth client ID**, application type **Desktop app**.
+3. Download its JSON, save it as `gmail-oauth-client.json` at the repo root (or point `GMAIL_OAUTH_CLIENT_PATH` at wherever you put it).
+4. `npm run gmail:authorize` -- opens a browser for a normal Google consent screen (log in as the sending account, e.g. `lawrence@twinhomebuyer.com`, approve). Saves a token to `gmail-token.json` (gitignored); after this, sending just works.
+5. Set `ENABLE_EMAIL_SENDING=true` in `.env` **and** `Enable Email Sending = TRUE` on the Settings tab when you're actually ready to send -- both default off.
 
 ### Node.js (Sheets client + Google Voice prep)
 

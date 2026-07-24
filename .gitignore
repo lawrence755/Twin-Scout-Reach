@@ -5,6 +5,8 @@ credentials.json
 service-account.json
 .clasp.json
 .clasprc.json
+gmail-oauth-client.json
+gmail-token.json
 playwright-report/
 test-results/
 *.log

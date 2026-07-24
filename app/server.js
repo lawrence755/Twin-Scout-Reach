@@ -119,7 +119,8 @@ const server = http.createServer(async (req, res) => {
     '/outreach/add-row': (body) => outreachActions.addRow(body).then(() => ({})),
     '/outreach/refresh-validation': () => outreachActions.refreshValidation().then((results) => ({ results })),
     '/outreach/submit-for-approval': () => outreachActions.submitForApproval().then((results) => ({ results })),
-    '/outreach/approve': () => outreachActions.approveOutreach().then((results) => ({ results }))
+    '/outreach/approve': () => outreachActions.approveOutreach().then((results) => ({ results })),
+    '/outreach/send-emails': () => outreachActions.sendApprovedEmails().then(({ sendingEnabled, results }) => ({ sendingEnabled, results }))
   };
   if (req.method === 'POST' && outreachRoutes[url.pathname]) {
     try {

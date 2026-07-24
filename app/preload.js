@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('outreachApi', {
   refreshValidation: () => ipcRenderer.invoke('outreach:refresh-validation'),
   submitForApproval: () => ipcRenderer.invoke('outreach:submit-for-approval'),
   approveOutreach: () => ipcRenderer.invoke('outreach:approve'),
+  sendApprovedEmails: () => ipcRenderer.invoke('outreach:send-emails'),
   listOutreachRows: () => ipcRenderer.invoke('outreach:list-rows'),
   onLog: (cb) => ipcRenderer.on('log', (_event, payload) => cb(payload)),
   onJobStarted: (cb) => ipcRenderer.on('job-started', (_event, payload) => cb(payload)),

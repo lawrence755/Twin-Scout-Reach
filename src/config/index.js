@@ -31,6 +31,10 @@ const config = {
   },
   voice: {
     profileDir: process.env.GOOGLE_VOICE_PROFILE_DIR || './.voice-profile'
+  },
+  gmail: {
+    oauthClientPath: process.env.GMAIL_OAUTH_CLIENT_PATH || './gmail-oauth-client.json',
+    tokenPath: process.env.GMAIL_TOKEN_PATH || './gmail-token.json'
   }
 };
 

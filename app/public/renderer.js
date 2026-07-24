@@ -34,6 +34,7 @@
       refreshValidation: () => fetch('/outreach/refresh-validation', { method: 'POST' }).then((r) => r.json()),
       submitForApproval: () => fetch('/outreach/submit-for-approval', { method: 'POST' }).then((r) => r.json()),
       approveOutreach: () => fetch('/outreach/approve', { method: 'POST' }).then((r) => r.json()),
+      sendApprovedEmails: () => fetch('/outreach/send-emails', { method: 'POST' }).then((r) => r.json()),
       listOutreachRows: () => fetch('/outreach/rows').then((r) => r.json()),
       onLog: (cb) => listeners.log.push(cb),
       onJobStarted: (cb) => listeners['job-started'].push(cb),
@@ -168,6 +169,19 @@
   wireOutreachAction('refresh-validation-btn', api.refreshValidation, 'Refresh validation');
   wireOutreachAction('submit-approval-btn', api.submitForApproval, 'Submit for approval');
   wireOutreachAction('approve-btn', api.approveOutreach, 'Approve outreach');
+
+  document.getElementById('send-emails-btn').addEventListener('click', async () => {
+    const result = await api.sendApprovedEmails();
+    if (result.ok === false) {
+      appendLog('system', 'Send approved emails failed: ' + result.error);
+      return;
+    }
+    appendLog('system', 'Send approved emails (sending ' + (result.sendingEnabled ? 'ON' : 'OFF, dry run') + '): ' + result.results.length + ' row(s).');
+    result.results.forEach((r) => {
+      appendLog('system', '  row ' + r.row + ' (' + r.address + ') -> ' + r.result + (r.notes ? ' -- ' + r.notes : ''));
+    });
+    refreshOutreachTable();
+  });
 
   refreshOutreachTable();
 })();

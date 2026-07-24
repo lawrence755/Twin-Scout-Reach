@@ -104,6 +104,8 @@ button small { color: var(--muted); font-weight: normal; }
 .add-row-form label { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
 .outreach-actions { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
 .outreach-actions .note { font-size: 0.75rem; color: var(--muted); }
+.danger-inline { border-color: var(--danger); }
+.danger-inline:hover { background: #3a1f22; }
 .outreach-table-wrap { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
 #outreach-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
 #outreach-table th, #outreach-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
