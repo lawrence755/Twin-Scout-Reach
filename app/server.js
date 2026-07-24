@@ -11,7 +11,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { JobRunner, readEnvFlags } = require('./jobRunner');
-const outreachActions = require('../src/sheets/outreachActions');
+const outreachActions = require('../src/outreach/actions');
 
 const PORT = Number(process.env.APP_PORT || 4747);
 const runner = new JobRunner();
@@ -117,10 +117,13 @@ const server = http.createServer(async (req, res) => {
 
   const outreachRoutes = {
     '/outreach/add-row': (body) => outreachActions.addRow(body).then(() => ({})),
+    '/outreach/update-row': (body) => outreachActions.updateRow(body.id, body.fields).then(() => ({})),
     '/outreach/refresh-validation': () => outreachActions.refreshValidation().then((results) => ({ results })),
     '/outreach/submit-for-approval': () => outreachActions.submitForApproval().then((results) => ({ results })),
     '/outreach/approve': () => outreachActions.approveOutreach().then((results) => ({ results })),
-    '/outreach/send-emails': () => outreachActions.sendApprovedEmails().then(({ sendingEnabled, results }) => ({ sendingEnabled, results }))
+    '/outreach/send-emails': () => outreachActions.sendApprovedEmails().then(({ sendingEnabled, results }) => ({ sendingEnabled, results })),
+    '/outreach/add-from-flip-scout': (body) =>
+      outreachActions.addFromFlipScout(body.sheetRows, body.campaign).then(({ added, skipped }) => ({ added: added.length, skipped }))
   };
   if (req.method === 'POST' && outreachRoutes[url.pathname]) {
     try {
@@ -139,6 +142,29 @@ const server = http.createServer(async (req, res) => {
       const rows = await outreachActions.listRows();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, rows }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/outreach/flip-scout-leads') {
+    try {
+      const leads = await outreachActions.listFlipScoutLeads();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, leads }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
+  if (req.method === 'GET' && url.pathname.startsWith('/outreach/row/')) {
+    try {
+      const id = url.pathname.slice('/outreach/row/'.length);
+      const row = outreachActions.getRow(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, row }));
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: err.message }));

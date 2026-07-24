@@ -36,6 +36,12 @@
       approveOutreach: () => fetch('/outreach/approve', { method: 'POST' }).then((r) => r.json()),
       sendApprovedEmails: () => fetch('/outreach/send-emails', { method: 'POST' }).then((r) => r.json()),
       listOutreachRows: () => fetch('/outreach/rows').then((r) => r.json()),
+      getOutreachRow: (id) => fetch('/outreach/row/' + encodeURIComponent(id)).then((r) => r.json()),
+      updateOutreachRow: (id, fields) =>
+        fetch('/outreach/update-row', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, fields }) }).then((r) => r.json()),
+      listFlipScoutLeads: () => fetch('/outreach/flip-scout-leads').then((r) => r.json()),
+      addFromFlipScout: (sheetRows, campaign) =>
+        fetch('/outreach/add-from-flip-scout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sheetRows, campaign }) }).then((r) => r.json()),
       onLog: (cb) => listeners.log.push(cb),
       onJobStarted: (cb) => listeners['job-started'].push(cb),
       onJobFinished: (cb) => listeners['job-finished'].push(cb)
@@ -115,6 +121,12 @@
 
   // --- Outreach Queue: add-row form, workflow buttons, rows table ---
   const CHECKBOX_FIELDS = ['tenantOccupied', 'needsWork', 'appearsRenovated', 'compReviewCompleted'];
+  const addRowForm = document.getElementById('add-row-form');
+  const cancelEditBtn = document.getElementById('cancel-edit-btn');
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
 
   async function refreshOutreachTable() {
     const result = await api.listOutreachRows();
@@ -124,29 +136,58 @@
     }
     const tbody = document.querySelector('#outreach-table tbody');
     tbody.innerHTML = '';
-    (result.rows || []).forEach((r) => {
+    (result.rows || []).forEach((r, i) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${r.row}</td><td>${escapeHtml(r.address)}</td><td>${escapeHtml(r.status)}</td><td>${escapeHtml(r.agentPhone)}</td><td>${escapeHtml(r.agentEmail)}</td>`;
+      tr.dataset.id = r.id;
+      tr.style.cursor = 'pointer';
+      tr.title = 'Click to edit this row';
+      tr.innerHTML = `<td>${i + 1}</td><td>${escapeHtml(r.address)}</td><td>${escapeHtml(r.status)}</td><td>${escapeHtml(r.agentPhone)}</td><td>${escapeHtml(r.agentEmail)}</td>`;
+      tr.addEventListener('click', () => loadRowIntoForm(r.id));
       tbody.appendChild(tr);
     });
   }
 
-  function escapeHtml(s) {
-    return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  async function loadRowIntoForm(id) {
+    const result = await api.getOutreachRow(id);
+    if (result.ok === false || !result.row) {
+      appendLog('system', 'Could not load row: ' + (result.error || 'not found'));
+      return;
+    }
+    const row = result.row;
+    addRowForm.elements.editingId.value = id;
+    ['propertyAddress', 'city', 'agentName', 'agentPhone', 'agentEmail', 'listingStatus', 'daysOnMarket', 'campaign'].forEach((key) => {
+      if (addRowForm.elements[key]) addRowForm.elements[key].value = row[key] || '';
+    });
+    CHECKBOX_FIELDS.forEach((key) => {
+      if (addRowForm.elements[key]) addRowForm.elements[key].checked = String(row[key]).toUpperCase() === 'TRUE';
+    });
+    document.getElementById('add-row-btn').textContent = 'Save changes';
+    cancelEditBtn.style.display = '';
+    appendLog('system', 'Editing row: ' + row.propertyAddress);
   }
 
-  document.getElementById('add-row-form').addEventListener('submit', async (e) => {
+  function resetForm() {
+    addRowForm.reset();
+    addRowForm.elements.editingId.value = '';
+    document.getElementById('add-row-btn').textContent = 'Add Row';
+    cancelEditBtn.style.display = 'none';
+  }
+  cancelEditBtn.addEventListener('click', resetForm);
+
+  addRowForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const form = e.target;
     const fields = {};
-    new FormData(form).forEach((value, key) => { fields[key] = value; });
+    new FormData(form).forEach((value, key) => { if (key !== 'editingId') fields[key] = value; });
     CHECKBOX_FIELDS.forEach((key) => { fields[key] = form.elements[key].checked ? 'TRUE' : 'FALSE'; });
-    const result = await api.addOutreachRow(fields);
+
+    const editingId = form.elements.editingId.value;
+    const result = editingId ? await api.updateOutreachRow(editingId, fields) : await api.addOutreachRow(fields);
     if (result.ok === false) {
-      appendLog('system', 'Add row failed: ' + result.error);
+      appendLog('system', (editingId ? 'Update' : 'Add') + ' row failed: ' + result.error);
     } else {
-      appendLog('system', 'Added row for ' + fields.propertyAddress);
-      form.reset();
+      appendLog('system', (editingId ? 'Updated' : 'Added') + ' row for ' + fields.propertyAddress);
+      resetForm();
       refreshOutreachTable();
     }
   });
@@ -161,7 +202,7 @@
       appendLog('system', label + ': ' + result.results.length + ' row(s) affected.');
       result.results.forEach((r) => {
         const detail = r.reasons ? r.reasons.join(' ') : (r.problems || []).join(' ');
-        appendLog('system', '  row ' + r.row + ' (' + r.address + ') -> ' + (r.status || 'Approved') + (detail ? ' -- ' + detail : ''));
+        appendLog('system', '  ' + r.address + ' -> ' + (r.status || 'Approved') + (detail ? ' -- ' + detail : ''));
       });
       refreshOutreachTable();
     });
@@ -178,10 +219,47 @@
     }
     appendLog('system', 'Send approved emails (sending ' + (result.sendingEnabled ? 'ON' : 'OFF, dry run') + '): ' + result.results.length + ' row(s).');
     result.results.forEach((r) => {
-      appendLog('system', '  row ' + r.row + ' (' + r.address + ') -> ' + r.result + (r.notes ? ' -- ' + r.notes : ''));
+      appendLog('system', '  ' + r.address + ' -> ' + r.result + (r.notes ? ' -- ' + r.notes : ''));
     });
     refreshOutreachTable();
   });
 
   refreshOutreachTable();
+
+  // --- Flip Scout Leads: browse + select rows to pull into the queue ---
+  async function refreshFlipScoutTable() {
+    const result = await api.listFlipScoutLeads();
+    const tbody = document.querySelector('#flip-scout-table tbody');
+    tbody.innerHTML = '';
+    if (result.ok === false) {
+      appendLog('system', 'Could not load Flip Scout Leads: ' + result.error);
+      return;
+    }
+    (result.leads || []).forEach((l) => {
+      const tr = document.createElement('tr');
+      const linkCell = l.redfinLink ? `<a href="${escapeHtml(l.redfinLink)}" target="_blank" rel="noopener">link</a>` : '';
+      tr.innerHTML = `<td><input type="checkbox" data-sheet-row="${l.sheetRow}" /></td><td>${escapeHtml(l.score)}</td><td>${escapeHtml(l.recommendation)}</td><td>${escapeHtml(l.address)}</td><td>${escapeHtml(l.city)}</td><td>${escapeHtml(l.arv)}</td><td>${escapeHtml(l.grossProfitLight)}</td><td>${linkCell}</td>`;
+      tbody.appendChild(tr);
+    });
+    appendLog('system', 'Loaded ' + (result.leads || []).length + ' Flip Scout lead(s).');
+  }
+
+  document.getElementById('load-flip-scout-btn').addEventListener('click', refreshFlipScoutTable);
+
+  document.getElementById('add-selected-flip-scout-btn').addEventListener('click', async () => {
+    const checked = Array.from(document.querySelectorAll('#flip-scout-table input[type="checkbox"]:checked'));
+    const sheetRows = checked.map((cb) => Number(cb.dataset.sheetRow));
+    if (sheetRows.length === 0) {
+      appendLog('system', 'Select at least one Flip Scout lead first.');
+      return;
+    }
+    const campaign = document.getElementById('flip-scout-campaign').value || 'flip-scout';
+    const result = await api.addFromFlipScout(sheetRows, campaign);
+    if (result.ok === false) {
+      appendLog('system', 'Add from Flip Scout failed: ' + result.error);
+      return;
+    }
+    appendLog('system', 'Added ' + result.added + ' row(s) to Outreach Queue. Skipped ' + result.skipped.length + ' duplicate(s).');
+    refreshOutreachTable();
+  });
 })();

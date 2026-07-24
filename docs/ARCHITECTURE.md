@@ -1,25 +1,50 @@
 # Architecture
 
-## Why two runtimes
+## The app owns everything except Flip Scout Leads itself
 
-The system is split across Google Apps Script (bound to the Sheet) and
-Node.js, because the two things that need direct access to something
-outside the Sheet -- Gmail and Google Voice -- have very different
-constraints:
+Bryan's `Flip Scout Leads` tab and `apps-script/FlipScoutSheet.js` (his
+hourly sync, KPI tab, rejected-leads blacklist) predate this system and
+stay untouched -- this is the one thing still read from the Sheet, and
+it's read-only.
 
-- **Gmail**: `GmailApp.sendEmail` works natively from Apps Script with
-  no separate credentials, and the send action is naturally triggered
-  by a Sheet menu item ("Send approved emails"). So all of Phases 2, 3,
-  5, and 6 live in `apps-script/`.
-- **Google Voice has no sending API.** The only way to prepare a
-  message is to drive the actual web UI, which means a real browser --
-  Playwright, which means Node.js. So Phase 7 lives in `src/voice/`.
+Everything outreach-specific -- the queue, communication log,
+suppression list, template rendering, approval flow, Gmail sending,
+Google Voice prep -- lives in the Node.js app (`app/` + `src/`) and a
+local JSON data store (`data/`, gitignored). Earlier versions of this
+system put that data in extra Sheet tabs and split logic between Apps
+Script and Node; that's been consolidated into one place so there's a
+single point of control and no risk of the two sides drifting apart.
 
-## One rule engine, two environments
+## Why Node.js only now, not Apps Script
+
+Apps Script was originally used because `GmailApp.sendEmail` needs no
+separate OAuth setup. That's no longer the deciding factor:
+`src/gmail/gmailClient.js` does a normal Gmail API OAuth "installed
+app" flow instead (see the README's one-time Gmail setup), so nothing
+about sending requires Apps Script anymore. Keeping Apps Script scoped
+to only Bryan's sync means `clasp push` (which replaces the *entire*
+remote project's file set) can never risk his hourly automation again,
+and there's one runtime to reason about instead of two.
+
+## Local data store
+
+`src/outreach/store.js` is a small file-backed store -- plain JSON
+arrays in `data/`, atomic writes (write to `.tmp`, rename over the
+real file). No database dependency. Rows get a generated `id`
+(replacing what used to be a Sheet row number); every other function
+in `src/outreach/actions.js` reads/writes by that `id`.
+
+`src/sheets/sheetsClient.js` is now just `getFlipScoutLeads()` -- a
+read-only Sheets API call (`spreadsheets.readonly` scope) mapping
+Bryan's actual `FlipScoutSheet.js` `COLUMNS` array to camelCase keys.
+Nothing else touches the Sheet.
+
+## One rule engine, still
 
 `shared/` holds the qualification rules, status flow, key/suppression
-logic, and template engine as plain JS files with no `require`/`import`.
-Each ends with:
+logic, and template engine, required directly by `src/outreach/actions.js`,
+`src/voice/*.js`, and `src/redfin/*.js`. It's still written with a
+`module.exports` guard rather than plain `require`/`export`:
 
 ```js
 if (typeof module !== 'undefined' && module.exports) {
@@ -27,57 +52,68 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 ```
 
-In Node, `module` exists, so `require('../shared/qualification')` works
-normally. In Apps Script, `module` is undefined, so that block never
-runs, and the functions declared above it become ordinary globals
-available to every other file in the project (Apps Script concatenates
-all files into one global scope regardless of folder nesting).
-
-`npm run build:apps-script` (`scripts/build-apps-script.js`) copies
-`shared/*.js` into `apps-script/shared/` before a `clasp push`, and
-regenerates `apps-script/Templates.js` from `templates/*.json` (Apps
-Script has no filesystem access to read the template files directly).
-Both generated outputs are gitignored -- `shared/` and `templates/` are
-the only source of truth.
+This is a holdover from when the same files also ran unmodified inside
+Google Apps Script (which has no module system) -- that copy step is
+gone now that Apps Script only runs Bryan's sync, but the guard is
+harmless to keep, and would make reusing this logic from Apps Script
+again trivial if that's ever needed.
 
 ## Layout
 
 ```
 shared/            Qualification rules, status flow, keys, template engine
 templates/          Versioned message content (Phase 4), one JSON file per template
-docs/               Voice guidelines, this file, the open-items checklist
-apps-script/        Bound Apps Script project (Phases 2, 3, 5, 6)
-  shared/           Generated -- see above
-  Templates.js      Generated -- see above
+docs/               Plan, this file, voice guidelines, open items, auto-mode risks
+apps-script/        Bound Apps Script project -- Bryan's Flip Scout sync ONLY
 src/
-  config/           .env-driven config and feature flags
-  sheets/           Narrow googleapis client (read Approved rows, write voice outcomes)
-  voice/            Playwright Google Voice prep (Phase 7)
-tests/              node:test coverage for shared/
-scripts/            build-apps-script.js
+  outreach/          store.js (local data) + actions.js (all outreach business logic)
+  sheets/            Read-only Flip Scout Leads reader
+  gmail/             Gmail API OAuth client + sender
+  redfin/            Agent-contact scraper (optional, separately gated)
+  voice/             Playwright Google Voice (prepare, and a separate auto-send script)
+  config/            .env-driven config and feature flags
+app/                Electron control panel (main.js/preload.js/jobRunner.js + public/ front end) and the browser-tab fallback (server.js)
+tests/              node:test coverage for shared/ and src/redfin/
 sample-data/        Example leads for exercising the rule engine locally
+data/               Local outreach data (gitignored) -- created on first use
 ```
+
+## Packaging the app (`npm run dist:win`)
+
+`electron-builder` with `asar: false` and `win.target: 'dir'` -- an
+unpacked folder, not a compressed single-file installer, since that
+avoids needing Wine-dependent NSIS tooling. The packaged layout
+preserves the repo's relative structure (`resources/app/app/main.js`,
+`resources/app/src/...`, etc.), so `.env` and `service-account.json`
+need to be copied to `resources/app/.env` / `resources/app/service-account.json`
+after building -- same relative position as in the source repo.
+
+`CSC_IDENTITY_AUTO_DISCOVERY=false` skips an unrelated code-signing
+tool download that needs Windows symlink privileges (elevated shell
+needed the first time if that download was already attempted and
+partially cached).
 
 ## Auto mode addendum
 
-`src/redfin/`, `apps-script/AutoSend.js`, and
-`src/voice/autoSendGoogleVoiceMessage.js` were added after the initial
-milestone to scrape agent contact info from Redfin and to send without
-a per-message approval click. They reuse the same `shared/` rule
-engine and log to a new `Auto Outreach Log` tab (kept separate from
-`Communication Log`, which records the human-approved flow). See
-`docs/AUTO_MODE_RISKS.md` for why this exists and what it costs.
+`src/redfin/` and `src/voice/autoSendGoogleVoiceMessage.js` add agent-
+contact scraping and a no-per-message-approval SMS send path. Both are
+additive and separately gated from the manual/approved path. Real-world
+testing found Redfin's bot detection blocks the automated-browser
+approach reliably, even right after a human clears its own verification
+challenge on a fresh profile -- see `docs/AUTO_MODE_RISKS.md` for the
+full account and what's still open (extending Bryan's already-trusted
+`flip_scout_redfin.py` scraper, in a separate repo, to capture agent
+info during its existing detail-page fetch).
 
 ## Safety layers
 
-Two independent switches gate live sending, both default to off:
+- **Email**: one `.env` flag, `ENABLE_EMAIL_SENDING`, default `false`.
+- **Voice prepare**: `ENABLE_VOICE_AUTOMATION`, default `false` --
+  gates whether a browser opens at all; `src/voice/prepareGoogleVoiceMessage.js`
+  never clicks Send regardless of this flag, because that code path
+  simply doesn't exist in that file.
+- **Voice auto-send**: `ENABLE_AUTO_SMS_SEND`, default `false` -- a
+  separate, more dangerous script (`autoSendGoogleVoiceMessage.js`)
+  that does click Send.
 
-1. The Sheet's `Settings` tab (`Enable Email Sending`, `Enable Voice
-   Automation`) -- read by Apps Script and Node respectively.
-2. `.env` (`ENABLE_EMAIL_SENDING`, `ENABLE_VOICE_AUTOMATION`) -- read
-   by the Node side only.
-
-Independent of both switches, `src/voice/prepareGoogleVoiceMessage.js`
-never clicks Google Voice's Send control under any condition -- that is
-not a flag-gated behavior, it is simply not code that exists in this
-repo. See the file's header comment.
+All three default off. Flipping one doesn't affect the others.

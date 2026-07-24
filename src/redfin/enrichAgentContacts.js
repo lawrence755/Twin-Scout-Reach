@@ -6,16 +6,13 @@
  * default 5s between requests) and stops per-row (not the whole run)
  * on a detected block/CAPTCHA -- see scrapeRedfin.js.
  */
-const config = require('../config');
-const { getOutreachQueueRows, updateOutreachQueueRow } = require('../sheets/sheetsClient');
+const store = require('../outreach/store');
 const { scrapeRedfinListing } = require('./scrapeRedfin');
 
 const DELAY_MS = Number(process.env.REDFIN_SCRAPE_DELAY_MS || 5000);
 
 async function main() {
-  const rows = await getOutreachQueueRows(
-    (row) => row.redfinLink && !row.agentPhone
-  );
+  const rows = store.getQueueRows((row) => row.redfinLink && !row.agentPhone);
 
   if (rows.length === 0) {
     console.log('No rows need Redfin enrichment (need a Redfin Link and no Agent Phone yet).');
@@ -29,15 +26,15 @@ async function main() {
   for (const row of rows) {
     try {
       const info = await scrapeRedfinListing(row.redfinLink, { delayMs: DELAY_MS });
-      await updateOutreachQueueRow(row.__rowNumber, {
+      store.updateQueueRow(row.id, {
         agentName: info.agentName || row.agentName,
         agentPhone: info.agentPhone || row.agentPhone,
         lastUpdated: new Date().toISOString()
       });
-      console.log('Row ' + row.__rowNumber + ': ' + info.agentName + ' / ' + info.agentPhone);
+      console.log('Row ' + row.id + ': ' + info.agentName + ' / ' + info.agentPhone);
       succeeded++;
     } catch (err) {
-      console.warn('Row ' + row.__rowNumber + ' (' + row.redfinLink + ') failed: ' + err.message);
+      console.warn('Row ' + row.id + ' (' + row.redfinLink + ') failed: ' + err.message);
       failed++;
     }
   }

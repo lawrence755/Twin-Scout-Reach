@@ -7,7 +7,7 @@ const path = require('path');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const { JobRunner, readEnvFlags } = require('./jobRunner');
-const outreachActions = require('../src/sheets/outreachActions');
+const outreachActions = require('../src/outreach/actions');
 
 const runner = new JobRunner();
 let mainWindow;
@@ -79,6 +79,32 @@ ipcMain.handle('outreach:add-row', async (_event, fields) => {
   }
 });
 
+ipcMain.handle('outreach:update-row', async (_event, { id, fields }) => {
+  try {
+    await outreachActions.updateRow(id, fields);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('outreach:list-flip-scout-leads', async () => {
+  try {
+    return { ok: true, leads: await outreachActions.listFlipScoutLeads() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('outreach:add-from-flip-scout', async (_event, { sheetRows, campaign }) => {
+  try {
+    const { added, skipped } = await outreachActions.addFromFlipScout(sheetRows, campaign);
+    return { ok: true, added: added.length, skipped };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('outreach:refresh-validation', async () => {
   try {
     return { ok: true, results: await outreachActions.refreshValidation() };
@@ -115,6 +141,14 @@ ipcMain.handle('outreach:send-emails', async () => {
 ipcMain.handle('outreach:list-rows', async () => {
   try {
     return { ok: true, rows: await outreachActions.listRows() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('outreach:get-row', async (_event, id) => {
+  try {
+    return { ok: true, row: outreachActions.getRow(id) };
   } catch (err) {
     return { ok: false, error: err.message };
   }

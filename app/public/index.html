@@ -24,9 +24,25 @@
     </div>
   </section>
 
+  <section class="panel flip-scout-panel">
+    <h2>Flip Scout Leads <small>(Bryan's, read-only)</small></h2>
+    <div class="outreach-actions">
+      <button id="load-flip-scout-btn">Load / refresh leads</button>
+      <input id="flip-scout-campaign" placeholder="Campaign" value="flip-scout" />
+      <button id="add-selected-flip-scout-btn">Add selected to Outreach Queue</button>
+    </div>
+    <div class="outreach-table-wrap">
+      <table id="flip-scout-table">
+        <thead><tr><th></th><th>Score</th><th>Rec.</th><th>Address</th><th>City</th><th>ARV</th><th>Profit (Light)</th><th>Redfin Link</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="panel outreach-panel">
     <h2>Outreach Queue</h2>
     <form id="add-row-form" class="add-row-form">
+      <input type="hidden" name="editingId" value="" />
       <input name="propertyAddress" placeholder="Property Address" required />
       <input name="city" placeholder="City" required />
       <input name="agentName" placeholder="Agent Name" required />
@@ -40,17 +56,18 @@
       <label><input type="checkbox" name="appearsRenovated" /> Appears Renovated</label>
       <label><input type="checkbox" name="compReviewCompleted" checked /> Comp Review Completed</label>
       <button type="submit" id="add-row-btn">Add Row</button>
+      <button type="button" id="cancel-edit-btn" style="display:none;">Cancel edit / New row</button>
     </form>
     <div class="outreach-actions">
       <button id="refresh-validation-btn">Refresh validation</button>
       <button id="submit-approval-btn">Submit for approval</button>
       <button id="approve-btn">Approve outreach</button>
       <button id="send-emails-btn" class="danger-inline">Send approved emails</button>
-      <span class="note">Uses the Settings tab's "Enable Email Sending" switch -- same one Apps Script reads.</span>
+      <span class="note">Gated by ENABLE_EMAIL_SENDING in .env. Click a row below to edit it (e.g. fill in agent info after adding from Flip Scout).</span>
     </div>
     <div class="outreach-table-wrap">
       <table id="outreach-table">
-        <thead><tr><th>Row</th><th>Address</th><th>Status</th><th>Agent Phone</th><th>Agent Email</th></tr></thead>
+        <thead><tr><th>#</th><th>Address</th><th>Status</th><th>Agent Phone</th><th>Agent Email</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -59,7 +76,6 @@
   <section class="panel actions">
     <button data-job="redfin-enrich" class="job-btn">Enrich agent contacts (Redfin)</button>
     <button data-job="voice-prepare" class="job-btn">Prepare Google Voice texts<br><small>stops before Send</small></button>
-    <button data-job="build-apps-script" class="job-btn">Rebuild Apps Script files</button>
 
     <div class="danger-box">
       <label>

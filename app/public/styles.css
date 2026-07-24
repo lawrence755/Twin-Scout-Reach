@@ -96,7 +96,10 @@ button small { color: var(--muted); font-weight: normal; }
 .input-row { display: flex; gap: 8px; margin-top: 8px; }
 .input-row input { flex: 1; background: #0f1115; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
 
-.outreach-panel h2 { margin: 0 0 10px; font-size: 1rem; }
+.outreach-panel h2, .flip-scout-panel h2 { margin: 0 0 10px; font-size: 1rem; }
+.flip-scout-panel h2 small { color: var(--muted); font-weight: normal; font-size: 0.8rem; }
+.flip-scout-panel .outreach-actions input { background: #0f1115; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+#outreach-table tbody tr:hover { background: #23283266; }
 .add-row-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .add-row-form input[type="text"], .add-row-form input:not([type]), .add-row-form input[type="number"] {
   background: #0f1115; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 0.85rem;

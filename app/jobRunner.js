@@ -14,8 +14,7 @@ const ROOT = path.resolve(__dirname, '..');
 const JOBS = {
   'redfin-enrich': { script: 'src/redfin/enrichAgentContacts.js', label: 'Enrich agent contacts (Redfin)' },
   'voice-prepare': { script: 'src/voice/prepareGoogleVoiceMessage.js', label: 'Prepare Google Voice texts (stops before Send)' },
-  'voice-autosend': { script: 'src/voice/autoSendGoogleVoiceMessage.js', label: 'Auto-send Google Voice texts (clicks Send)' },
-  'build-apps-script': { script: 'scripts/build-apps-script.js', label: 'Rebuild Apps Script files from shared/ + templates/' }
+  'voice-autosend': { script: 'src/voice/autoSendGoogleVoiceMessage.js', label: 'Auto-send Google Voice texts (clicks Send)' }
 };
 
 class JobRunner extends EventEmitter {

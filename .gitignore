@@ -7,6 +7,7 @@ service-account.json
 .clasprc.json
 gmail-oauth-client.json
 gmail-token.json
+data/*.json
 playwright-report/
 test-results/
 *.log

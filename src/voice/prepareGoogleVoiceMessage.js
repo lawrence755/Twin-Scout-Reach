@@ -18,7 +18,15 @@
 const readline = require('readline');
 const { chromium } = require('playwright');
 const config = require('../config');
-const { getApprovedSmsRows, writeVoiceOutcome } = require('../sheets/sheetsClient');
+const store = require('../outreach/store');
+
+function getApprovedSmsRows() {
+  return store.getQueueRows((r) => r.status === 'Approved' && r.renderedSmsBody);
+}
+
+function writeVoiceOutcome(id, { status, notes }) {
+  return store.updateQueueRow(id, { status, qualificationReasons: notes, lastUpdated: new Date().toISOString() });
+}
 
 const GOOGLE_VOICE_URL = 'https://voice.google.com/u/0/messages';
 
@@ -77,17 +85,19 @@ async function prepareOne(page, row) {
 
 async function main() {
   if (!config.flags.voiceAutomationEnabled) {
-    const rows = await getApprovedSmsRows().catch((err) => {
+    let rows = [];
+    try {
+      rows = getApprovedSmsRows();
+    } catch (err) {
       console.log('Voice automation is OFF (ENABLE_VOICE_AUTOMATION=false). Could not preview rows: ' + err.message);
-      return [];
-    });
+    }
     console.log('Voice automation is OFF (ENABLE_VOICE_AUTOMATION=false). No browser will be opened.');
     console.log(rows.length + ' row(s) are Approved and ready to prepare once this is turned on:');
     rows.forEach((row) => console.log('  - ' + row.agentName + ' (' + row.agentPhone + ') -- ' + row.propertyAddress));
     return;
   }
 
-  const rows = await getApprovedSmsRows();
+  const rows = getApprovedSmsRows();
   if (rows.length === 0) {
     console.log('No Approved rows with a rendered SMS body found.');
     return;
@@ -100,8 +110,8 @@ async function main() {
 
   for (const row of rows) {
     const result = await prepareOne(page, row);
-    await writeVoiceOutcome(row.__rowNumber, result);
-    console.log('Recorded outcome for row ' + row.__rowNumber + ': ' + result.status);
+    writeVoiceOutcome(row.id, result);
+    console.log('Recorded outcome for row ' + row.id + ': ' + result.status);
   }
 
   await context.close();

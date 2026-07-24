@@ -21,13 +21,21 @@ const config = require('../config');
 const { evaluateQualification, QUALIFICATION_STATUS } = require('../../shared/qualification');
 const { buildOutreachKey, isSuppressed } = require('../../shared/keys');
 const { renderTemplate } = require('../../shared/templateEngine');
-const {
-  getOutreachQueueRows,
-  updateOutreachQueueRow,
-  appendAutoOutreachLog,
-  getSuppressionList
-} = require('../sheets/sheetsClient');
+const store = require('../outreach/store');
 const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
+
+function getOutreachQueueRows(filterFn) {
+  return store.getQueueRows(filterFn);
+}
+function updateOutreachQueueRow(id, fields) {
+  return store.updateQueueRow(id, { ...fields, lastUpdated: new Date().toISOString() });
+}
+function appendAutoOutreachLog(fields) {
+  return store.appendCommunicationLog({ ...fields, autoSent: true });
+}
+function getSuppressionList() {
+  return store.getSuppressionList();
+}
 
 const GOOGLE_VOICE_URL = 'https://voice.google.com/u/0/messages';
 
@@ -131,7 +139,7 @@ async function main() {
   const ready = items.filter((i) => !i.blocked);
 
   for (const item of items.filter((i) => i.blocked)) {
-    await updateOutreachQueueRow(item.row.__rowNumber, {
+    await updateOutreachQueueRow(item.row.id, {
       status: item.reason.toLowerCase().includes('duplicate') ? 'Duplicate' : 'Needs Review',
       qualificationReasons: item.reason
     });
@@ -148,7 +156,7 @@ async function main() {
 
   for (const item of ready) {
     const outcome = await sendOne(page, item);
-    await updateOutreachQueueRow(item.row.__rowNumber, {
+    await updateOutreachQueueRow(item.row.id, {
       status: outcome.result === 'Sent' ? 'Contacted' : 'Needs Review',
       qualificationReasons: outcome.notes
     });

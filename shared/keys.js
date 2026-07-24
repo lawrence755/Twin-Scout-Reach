@@ -1,16 +1,14 @@
 /**
  * Contact/outreach key normalization and duplicate/suppression checks.
  *
- * This file is the single source of truth for these rules. It runs
- * unmodified in two environments:
- *   - Node.js (via require, see tests/ and src/)
- *   - Google Apps Script (copied verbatim into apps-script/shared/ by
- *     scripts/build-apps-script.js before `clasp push`)
- *
- * Do not add `require`/`import`/`export` syntax here — Apps Script's V8
- * runtime has no module system. Everything is a plain global function,
- * and the module.exports block at the bottom is skipped by Apps Script
- * because `module` is undefined there.
+ * Required by Node.js (via require, see tests/ and src/). Written as a
+ * plain global function plus a module.exports guard rather than
+ * require/import/export syntax -- this file used to also run
+ * unmodified inside Google Apps Script (which has no module system);
+ * that copy step was removed once Apps Script was scoped down to just
+ * Bryan's Flip Scout sync, but the guard is harmless to keep and
+ * would make reusing this file from Apps Script again trivial if that
+ * ever comes back.
  */
 
 function normalizePhone(rawPhone) {

@@ -35,12 +35,23 @@ before touching Gmail or Google Voice:
 - Duplicate outreach-key detection
 - `Do Not Automate?` flag
 - Missing/unresolved merge-field check on the rendered message
-- The `Enable Email Sending` master switch (Sheet Settings), still
-  defaults to FALSE
-- `ENABLE_AUTO_SMS_SEND` (new, Node-side), still defaults to `false`,
-  and is a *separate* switch from `ENABLE_VOICE_AUTOMATION` -- turning
-  on voice automation alone still only prepares and stops before Send
+- The `ENABLE_EMAIL_SENDING` master switch (`.env` -- moved here from
+  the Sheet's now-removed `Settings` tab during the later consolidation
+  onto the local data store; see `docs/ARCHITECTURE.md`), still
+  defaults to `false`
+- `ENABLE_AUTO_SMS_SEND` (Node-side), still defaults to `false`, and is
+  a *separate* switch from `ENABLE_VOICE_AUTOMATION` -- turning on
+  voice automation alone still only prepares and stops before Send
   (`src/voice/prepareGoogleVoiceMessage.js` is unchanged)
+
+**Note on the email side of this addendum:** the original no-approval
+email path (`autoSendEligibleOutreach`, an Apps Script menu item) was
+retired when the outreach data model moved off the Sheet entirely --
+`sendApprovedEmails()` in `src/outreach/actions.js` (used by the app)
+still requires a row to be `Approved` first, same as the original
+plan. Only the SMS side (`autoSendGoogleVoiceMessage.js`) still has a
+no-approval path. If a no-approval email path is wanted again, it
+would need to be added back deliberately -- it isn't present right now.
 
 ## Residual risks that are NOT mitigated by anything in this repo
 
@@ -54,10 +65,26 @@ before touching Gmail or Google Voice:
   instead of continuing when it detects a block/CAPTCHA page. That
   limits how far it goes, but does not remove the underlying ToS risk
   of running it at all.
-- Redfin's page structure isn't public and changes over time; the
-  agent-name/phone extraction in `src/redfin/parseAgentInfo.js` is a
-  best guess pattern, not verified against a live page as of this
-  writing. Expect it to need adjustment.
+- **Confirmed by real-world testing (2026-07-23):** the agent-name/
+  phone parser itself works correctly once given real page content --
+  the actual blocker is that Redfin's bot detection reliably blocks the
+  automated browser, even immediately after a human manually clears
+  its own verification challenge on a brand-new profile. This was
+  tested across a plain HTTP fetch, headless Playwright, and headed
+  Playwright with both a fresh and a real trusted Chrome profile -- all
+  four hit the same block. This is not a fixable selector/timing bug;
+  getting past it would mean fingerprint-spoofing or proxy rotation,
+  which is out of scope (see above).
+- The one still-open, legitimate path: `flip_scout_redfin.py` (a
+  separate repo, Bryan's) already fetches these same listing detail
+  pages successfully, on an hourly schedule, without getting blocked --
+  because it's an established, already-trusted scraper, not a new bot.
+  Adding agent-name/phone extraction to that existing fetch (using the
+  same parsing logic already proven to work, in
+  `src/redfin/parseAgentInfo.js`) is a fundamentally different, much
+  lower-risk ask than anything tried against Redfin directly from this
+  repo. That change has not been made -- it needs Bryan's review since
+  it's his pipeline.
 
 ### Auto-sending SMS (`src/voice/autoSendGoogleVoiceMessage.js`)
 
@@ -82,11 +109,12 @@ before touching Gmail or Google Voice:
 
 | Capability | Manual/approved (original plan) | Auto (this addendum) |
 | --- | --- | --- |
-| Agent contact info | Verified by hand (Phase 3) | `npm run redfin:enrich` |
-| Email | `Approve outreach` then `Send approved emails` menu items | `Auto-send eligible outreach` menu item |
-| SMS | `npm run voice:prepare` -- always stops before Send | `npm run voice:autosend` -- clicks Send, gated by `ENABLE_AUTO_SMS_SEND` |
+| Agent contact info | Verified by hand in the app (Phase 3) | "Enrich agent contacts (Redfin)" button -- currently blocked by Redfin's bot detection, see above |
+| Email | Approve outreach, then Send approved emails, both in the app | Not currently available -- retired during the later move off the Sheet; see the note above |
+| SMS | `npm run voice:prepare` / the app's "Prepare Google Voice texts" button -- always stops before Send | `npm run voice:autosend` / "Auto-send Google Voice texts" button -- clicks Send, gated by `ENABLE_AUTO_SMS_SEND` |
 
-The manual/approved path is left fully intact -- nothing here deletes
-it. Auto mode is additive and separately gated, so it's possible to
-turn one on without the other, or to go back to the manual path at any
-time by just not running the auto-send scripts/menu item.
+The manual/approved path is the primary one and is fully intact. Auto
+mode (SMS side only, currently) is additive and separately gated, so
+it's possible to turn it on without affecting anything else, or to go
+back to the manual path at any time by just not running the auto-send
+script/button.
