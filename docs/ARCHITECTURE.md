@@ -39,6 +39,15 @@ read-only Sheets API call (`spreadsheets.readonly` scope) mapping
 Bryan's actual `FlipScoutSheet.js` `COLUMNS` array to camelCase keys.
 Nothing else touches the Sheet.
 
+A `Flip Quality` column (values `Good Flip` / `Flip W/ Caution` /
+`Thin Flip`) was added to the Sheet manually alongside the
+score-derived `Recommendation` column. `listFlipScoutLeads()` in
+`src/outreach/actions.js` surfaces it as `flipQuality` plus a derived
+`isGoodFlip` boolean; the app's Flip Scout Leads panel defaults to
+showing only `Good Flip` rows (togglable) and has a "Select all Good
+Flip" button, since the only leads worth reaching out on are the ones
+marked Good Flip.
+
 ## One rule engine, still
 
 `shared/` holds the qualification rules, status flow, key/suppression

@@ -34,8 +34,11 @@ const FLIP_SCOUT_HEADERS = {
   'Gross Profit (Heavy)': 'grossProfitHeavy',
   'Risks': 'risks',
   'Redfin Link': 'redfinLink',
-  'First Added': 'firstAdded'
+  'First Added': 'firstAdded',
+  'Flip Quality': 'flipQuality'
 };
+
+const GOOD_FLIP_QUALITY = 'Good Flip';
 
 async function getSheetsClient() {
   const auth = new google.auth.GoogleAuth({
@@ -75,4 +78,4 @@ async function getFlipScoutLeads(filterFn) {
   return filterFn ? rows.filter(filterFn) : rows;
 }
 
-module.exports = { getFlipScoutLeads, FLIP_SCOUT_SHEET_NAME };
+module.exports = { getFlipScoutLeads, FLIP_SCOUT_SHEET_NAME, GOOD_FLIP_QUALITY };

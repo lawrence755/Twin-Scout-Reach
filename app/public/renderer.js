@@ -227,24 +227,58 @@
   refreshOutreachTable();
 
   // --- Flip Scout Leads: browse + select rows to pull into the queue ---
-  async function refreshFlipScoutTable() {
-    const result = await api.listFlipScoutLeads();
+  const FLIP_QUALITY_CLASS = {
+    'Good Flip': 'flip-quality-good',
+    'Flip W/ Caution': 'flip-quality-caution',
+    'Thin Flip': 'flip-quality-thin'
+  };
+
+  function flipQualityBadge(quality) {
+    if (!quality) return '';
+    const cls = FLIP_QUALITY_CLASS[quality] || '';
+    return `<span class="flip-quality-badge ${cls}">${escapeHtml(quality)}</span>`;
+  }
+
+  let allFlipScoutLeads = [];
+
+  function renderFlipScoutRows() {
+    const goodOnly = document.getElementById('good-flip-only-filter').checked;
+    const leads = goodOnly ? allFlipScoutLeads.filter((l) => l.isGoodFlip) : allFlipScoutLeads;
     const tbody = document.querySelector('#flip-scout-table tbody');
     tbody.innerHTML = '';
+    leads.forEach((l) => {
+      const tr = document.createElement('tr');
+      const linkCell = l.redfinLink ? `<a href="${escapeHtml(l.redfinLink)}" target="_blank" rel="noopener">link</a>` : '';
+      tr.innerHTML = `<td><input type="checkbox" data-sheet-row="${l.sheetRow}" /></td><td>${escapeHtml(l.score)}</td><td>${escapeHtml(l.recommendation)}</td><td>${flipQualityBadge(l.flipQuality)}</td><td>${escapeHtml(l.address)}</td><td>${escapeHtml(l.city)}</td><td>${escapeHtml(l.arv)}</td><td>${escapeHtml(l.grossProfitLight)}</td><td>${linkCell}</td>`;
+      tbody.appendChild(tr);
+    });
+    appendLog('system', 'Showing ' + leads.length + ' of ' + allFlipScoutLeads.length + ' Flip Scout lead(s)' + (goodOnly ? ' (Good Flip only).' : '.'));
+  }
+
+  async function refreshFlipScoutTable() {
+    const result = await api.listFlipScoutLeads();
     if (result.ok === false) {
       appendLog('system', 'Could not load Flip Scout Leads: ' + result.error);
       return;
     }
-    (result.leads || []).forEach((l) => {
-      const tr = document.createElement('tr');
-      const linkCell = l.redfinLink ? `<a href="${escapeHtml(l.redfinLink)}" target="_blank" rel="noopener">link</a>` : '';
-      tr.innerHTML = `<td><input type="checkbox" data-sheet-row="${l.sheetRow}" /></td><td>${escapeHtml(l.score)}</td><td>${escapeHtml(l.recommendation)}</td><td>${escapeHtml(l.address)}</td><td>${escapeHtml(l.city)}</td><td>${escapeHtml(l.arv)}</td><td>${escapeHtml(l.grossProfitLight)}</td><td>${linkCell}</td>`;
-      tbody.appendChild(tr);
-    });
-    appendLog('system', 'Loaded ' + (result.leads || []).length + ' Flip Scout lead(s).');
+    allFlipScoutLeads = result.leads || [];
+    renderFlipScoutRows();
   }
 
   document.getElementById('load-flip-scout-btn').addEventListener('click', refreshFlipScoutTable);
+  document.getElementById('good-flip-only-filter').addEventListener('change', renderFlipScoutRows);
+
+  document.getElementById('select-all-good-flip-btn').addEventListener('click', () => {
+    const boxes = Array.from(document.querySelectorAll('#flip-scout-table input[type="checkbox"]'));
+    let count = 0;
+    boxes.forEach((cb) => {
+      const lead = allFlipScoutLeads.find((l) => String(l.sheetRow) === cb.dataset.sheetRow);
+      const isGood = lead && lead.isGoodFlip;
+      cb.checked = isGood;
+      if (isGood) count++;
+    });
+    appendLog('system', 'Selected ' + count + ' Good Flip lead(s).');
+  });
 
   document.getElementById('add-selected-flip-scout-btn').addEventListener('click', async () => {
     const checked = Array.from(document.querySelectorAll('#flip-scout-table input[type="checkbox"]:checked'));

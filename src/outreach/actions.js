@@ -17,7 +17,7 @@ const { renderTemplate, extractMergeFields } = require('../../shared/templateEng
 const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
 const initialEmailTemplate = require('../../templates/initial-email.v1.json');
 const store = require('./store');
-const { getFlipScoutLeads } = require('../sheets/sheetsClient');
+const { getFlipScoutLeads, GOOD_FLIP_QUALITY } = require('../sheets/sheetsClient');
 const gmailClient = require('../gmail/gmailClient');
 
 const PRE_APPROVAL_STATUSES = ['Information Needed', 'Needs Review', 'Ready for Drafting'];
@@ -44,7 +44,9 @@ async function listFlipScoutLeads() {
     arv: l.arv,
     grossProfitLight: l.grossProfitLight,
     risks: l.risks,
-    redfinLink: l.redfinLink
+    redfinLink: l.redfinLink,
+    flipQuality: l.flipQuality,
+    isGoodFlip: l.flipQuality === GOOD_FLIP_QUALITY
   }));
 }
 
