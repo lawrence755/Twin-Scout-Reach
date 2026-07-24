@@ -5,10 +5,33 @@
  * "true" -- an unset, misspelled, or empty variable must never be
  * treated as "on".
  */
-require('dotenv').config();
+const path = require('path');
+
+// Anchor to this file's own location (src/config -> repo root, or
+// resources/app in the packaged Electron app), never to process.cwd().
+// A path-shaped setting resolved against cwd instead broke in practice:
+// double-clicking the packaged .exe gives it a cwd of dist/win-unpacked/
+// (the .exe's own folder), one level above where service-account.json
+// etc. actually live (resources/app/) -- so a relative default like
+// './service-account.json' silently pointed at the wrong place. Every
+// path-shaped setting below is resolved through resolvePath() so this
+// can't happen again regardless of how or from where the process was
+// launched.
+const ROOT = path.resolve(__dirname, '..', '..');
+
+require('dotenv').config({ path: path.join(ROOT, '.env') });
 
 function isEnabled(envVar) {
   return String(process.env[envVar] || '').trim().toLowerCase() === 'true';
+}
+
+// envValue may be unset, a relative path, or an absolute path.
+// path.resolve(ROOT, x) does the right thing for all three: unset ->
+// falls through to defaultRelativePath resolved against ROOT; relative
+// -> resolved against ROOT (not cwd); absolute -> returned as-is
+// (path.resolve discards ROOT once it hits an absolute segment).
+function resolvePath(envValue, defaultRelativePath) {
+  return path.resolve(ROOT, envValue || defaultRelativePath);
 }
 
 const config = {
@@ -18,7 +41,7 @@ const config = {
   },
   sheets: {
     sheetId: process.env.GOOGLE_SHEET_ID || '',
-    credentialsPath: process.env.GOOGLE_APPLICATION_CREDENTIALS || './service-account.json'
+    credentialsPath: resolvePath(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'service-account.json')
   },
   sender: {
     name: process.env.SENDER_NAME || '',
@@ -30,11 +53,11 @@ const config = {
     googleReviewLink: process.env.GOOGLE_REVIEW_LINK || ''
   },
   voice: {
-    profileDir: process.env.GOOGLE_VOICE_PROFILE_DIR || './.voice-profile'
+    profileDir: resolvePath(process.env.GOOGLE_VOICE_PROFILE_DIR, '.voice-profile')
   },
   gmail: {
-    oauthClientPath: process.env.GMAIL_OAUTH_CLIENT_PATH || './gmail-oauth-client.json',
-    tokenPath: process.env.GMAIL_TOKEN_PATH || './gmail-token.json'
+    oauthClientPath: resolvePath(process.env.GMAIL_OAUTH_CLIENT_PATH, 'gmail-oauth-client.json'),
+    tokenPath: resolvePath(process.env.GMAIL_TOKEN_PATH, 'gmail-token.json')
   }
 };
 
