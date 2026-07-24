@@ -10,6 +10,7 @@
     "voice:autosend": "node src/voice/autoSendGoogleVoiceMessage.js",
     "redfin:enrich": "node src/redfin/enrichAgentContacts.js",
     "gmail:authorize": "node scripts/authorize-gmail.js",
+    "test-row:add": "node scripts/add-test-row.js",
     "app": "electron .",
     "app:web": "node app/server.js",
     "dist:win": "electron-builder --win --dir"
