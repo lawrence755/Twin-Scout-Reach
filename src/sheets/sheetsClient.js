@@ -1,15 +1,18 @@
 /**
  * Access to the Flip Scout Leads tab. Bryan's FlipScoutSheet.js owns
- * that tab entirely (hourly sync, KPI tab, rejected-leads blacklist);
- * this app is read-only on everything except one deliberate exception:
- * the "Contacted?" column, which checkReplies() keeps in sync with
- * local outreach status (see updateContactedColumn()) so Bryan/the
- * team can see progress at a glance without opening the app. Every
- * other outreach-related concern (queue, log, suppression list) still
- * lives entirely locally -- see src/outreach/store.js.
+ * that tab entirely (hourly sync, KPI tab, rejected-leads blacklist) --
+ * this app is read-only on it. Current outreach status lives in the
+ * app-owned "Outreach Status" tab instead (see
+ * writeOutreachStatusSnapshot() below) -- a prior "Contacted?" mirror
+ * column on Flip Scout Leads itself was retired once that column
+ * stopped existing on Bryan's sheet, since Outreach Status already
+ * covers the same info and more. Every other outreach-related concern
+ * (queue, log, suppression list) still lives entirely locally -- see
+ * src/outreach/store.js.
  */
 const { google } = require('googleapis');
 const config = require('../config');
+const { normalizeAddress } = require('../../shared/keys');
 
 const FLIP_SCOUT_SHEET_NAME = 'Flip Scout Leads';
 
@@ -38,7 +41,8 @@ const FLIP_SCOUT_HEADERS = {
   'Risks': 'risks',
   'Redfin Link': 'redfinLink',
   'First Added': 'firstAdded',
-  'Flip Quality': 'flipQuality'
+  'Flip Quality': 'flipQuality',
+  'REI Link & Agent Name': 'reiAgentName'
 };
 
 const GOOD_FLIP_QUALITY = 'Good Flip';
@@ -46,7 +50,8 @@ const GOOD_FLIP_QUALITY = 'Good Flip';
 async function getSheetsClient() {
   const auth = new google.auth.GoogleAuth({
     keyFile: config.sheets.credentialsPath,
-    // Full read/write scope -- needed for updateContactedColumn() below.
+    // Full read/write scope -- needed for the various write functions
+    // below (writeOutreachStatusSnapshot, writeOutreachReviewDetails).
     // The service account must be shared on the Sheet as Editor, not
     // just Viewer, for writes to actually succeed.
     scopes: ['https://www.googleapis.com/auth/spreadsheets']
@@ -81,6 +86,26 @@ async function getFlipScoutLeads(filterFn) {
     });
     return obj;
   }).filter((row) => row.propertyAddress); // skip fully-blank trailing rows
+
+  // "REI Link & Agent Name" displays the agent's name but carries their
+  // REI BlackBook contact URL as a hyperlink, not as cell text -- a
+  // plain values.get() above only ever returns the display text, so a
+  // second, hyperlink-aware read is needed to recover the actual link.
+  const reiColIndex = (headerRow || []).indexOf('REI Link & Agent Name');
+  if (reiColIndex !== -1 && dataRows.length > 0) {
+    const colLetter = columnIndexToLetter(reiColIndex);
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId: config.sheets.sheetId,
+      ranges: [`'${FLIP_SCOUT_SHEET_NAME}'!${colLetter}2:${colLetter}${dataRows.length + 1}`],
+      fields: 'sheets.data.rowData.values(hyperlink)'
+    });
+    const rowData = (meta.data.sheets[0].data[0] || {}).rowData || [];
+    rows.forEach((row, i) => {
+      const cell = rowData[i] && rowData[i].values && rowData[i].values[0];
+      row.reiContactLink = (cell && cell.hyperlink) || '';
+    });
+  }
+
   return filterFn ? rows.filter(filterFn) : rows;
 }
 
@@ -93,53 +118,6 @@ function columnIndexToLetter(index) {
     n = Math.floor((n - 1) / 26);
   }
   return letter;
-}
-
-/**
- * Writes into the "Contacted?" column for every Flip Scout Leads row
- * whose Address matches a key in statusByAddress (e.g.
- * { '123 Test St': 'Handed Off', '456 Test Ave': 'Following Up' }).
- * Looks up "Address" and "Contacted?" by header label each call rather
- * than a hardcoded column letter, so this keeps working if Bryan's
- * sheet ever gets columns reordered/inserted.
- */
-async function updateContactedColumn(statusByAddress) {
-  requireSheetId();
-  if (!statusByAddress || Object.keys(statusByAddress).length === 0) return { updated: 0 };
-
-  const sheets = await getSheetsClient();
-  const { data } = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.sheets.sheetId,
-    range: `'${FLIP_SCOUT_SHEET_NAME}'`
-  });
-  const [headerRow, ...dataRows] = data.values || [[]];
-  const contactedColIndex = (headerRow || []).indexOf('Contacted?');
-  const addressColIndex = (headerRow || []).indexOf('Address');
-  if (contactedColIndex === -1) {
-    throw new Error('No "Contacted?" column found in the Flip Scout Leads header row.');
-  }
-  if (addressColIndex === -1) {
-    throw new Error('No "Address" column found in the Flip Scout Leads header row.');
-  }
-  const colLetter = columnIndexToLetter(contactedColIndex);
-
-  const updates = [];
-  dataRows.forEach((raw, i) => {
-    const address = raw[addressColIndex];
-    if (address && Object.prototype.hasOwnProperty.call(statusByAddress, address)) {
-      updates.push({
-        range: `'${FLIP_SCOUT_SHEET_NAME}'!${colLetter}${i + 2}`,
-        values: [[statusByAddress[address]]]
-      });
-    }
-  });
-  if (updates.length === 0) return { updated: 0 };
-
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId: config.sheets.sheetId,
-    requestBody: { valueInputOption: 'RAW', data: updates }
-  });
-  return { updated: updates.length };
 }
 
 const OUTREACH_STATUS_SHEET_NAME = 'Outreach Status';
@@ -192,11 +170,188 @@ async function writeOutreachStatusSnapshot(rows) {
   return { rows: rows.length };
 }
 
+const REDFIN_AGENT_CONTACTS_SHEET_NAME = 'Redfin Agent Contacts';
+
+// Matches the header row created for Claude Cowork's crawl -- see
+// docs/COWORK_REDFIN_CRAWL_PROMPT.md. Cowork owns writes to this tab;
+// this app only ever reads from it.
+const REDFIN_AGENT_CONTACTS_HEADERS = {
+  'Address': 'propertyAddress',
+  'Redfin Link': 'redfinLink',
+  'Agent Name': 'agentName',
+  'Agent Phone': 'agentPhone',
+  'Brokerage': 'brokerage',
+  'DRE #': 'dreNumber',
+  'Agent Email': 'agentEmail',
+  'Fetched At': 'fetchedAt'
+};
+
+/**
+ * Reads every row Cowork has fetched into the "Redfin Agent Contacts"
+ * tab. Read-only -- nothing here ever writes to this tab.
+ */
+async function getRedfinAgentContacts() {
+  requireSheetId();
+  const sheets = await getSheetsClient();
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${REDFIN_AGENT_CONTACTS_SHEET_NAME}'`
+  });
+  const [headerRow, ...dataRows] = data.values || [[]];
+  return dataRows.map((raw) => {
+    // Cowork's actual output (observed 2026-07-25) writes each row as
+    // one string with literal tab characters crammed into column A,
+    // rather than real per-column values -- tolerate that by splitting
+    // it back apart first. A leading "'" on a cell is Cowork guarding
+    // against Sheets auto-reformatting a DRE #/timestamp as a number
+    // once split into real columns -- not real data, so strip it.
+    const cells = (raw.length === 1 && raw[0] && raw[0].includes('\t'))
+      ? raw[0].split('\t').map((c) => c.replace(/^'/, ''))
+      : raw;
+    const obj = {};
+    (headerRow || []).forEach((label, col) => {
+      const key = REDFIN_AGENT_CONTACTS_HEADERS[label];
+      if (key) obj[key] = cells[col] !== undefined ? cells[col] : '';
+    });
+    return obj;
+  }).filter((row) => row.propertyAddress);
+}
+
+const OUTREACH_REVIEW_SHEET_NAME = 'Outreach Review';
+const OUTREACH_REVIEW_HEADERS = {
+  'Address': 'propertyAddress',
+  'Ready for Automated Outreach?': 'readyForAutomatedOutreach',
+  'Reviewed By': 'reviewedBy',
+  'Reviewed At': 'reviewedAt',
+  'Agent Name': 'agentName',
+  'Agent Phone': 'agentPhone',
+  'Agent Email': 'agentEmail',
+  'REI Notes Flag': 'reiNotesFlag'
+};
+
+// Columns REI BlackBook enrichment writes automatically -- "Address",
+// "Ready for Automated Outreach?", "Reviewed By", and "Reviewed At"
+// stay human-owned (never written by writeOutreachReviewDetails below).
+const OUTREACH_REVIEW_DETAIL_COLUMNS = ['Agent Name', 'Agent Phone', 'Agent Email', 'REI Notes Flag'];
+
+/**
+ * Reads every row from the "Outreach Review" tab -- a separate,
+ * small tab (not a 26th column on the already-busy Flip Scout Leads
+ * sheet) where a human marks whether a lead is actually clear for
+ * automated outreach, keyed by Address.
+ */
+async function getOutreachReviewRows() {
+  requireSheetId();
+  const sheets = await getSheetsClient();
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_REVIEW_SHEET_NAME}'`
+  });
+  const [headerRow, ...dataRows] = data.values || [[]];
+  return dataRows.map((raw) => {
+    const obj = {};
+    (headerRow || []).forEach((label, col) => {
+      const key = OUTREACH_REVIEW_HEADERS[label];
+      if (key) obj[key] = raw[col] !== undefined ? raw[col] : '';
+    });
+    return obj;
+  }).filter((row) => row.propertyAddress);
+}
+
+async function ensureOutreachReviewDetailColumns(sheets, headerRow) {
+  const missing = OUTREACH_REVIEW_DETAIL_COLUMNS.filter((h) => !headerRow.includes(h));
+  if (missing.length === 0) return headerRow;
+  const newHeaderRow = [...headerRow, ...missing];
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_REVIEW_SHEET_NAME}'!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [newHeaderRow] }
+  });
+  return newHeaderRow;
+}
+
+/**
+ * Writes REI BlackBook-fetched details (agent name/phone/email, and
+ * any do-not-automate note found) into the "Outreach Review" tab, so
+ * whoever reviews a lead there already has what was found without
+ * needing to separately open REI BlackBook themselves. Upserts by
+ * Address: updates only the detail columns on a matching row, or
+ * appends a new row (with the human-owned columns left blank for
+ * them to fill in) if the address isn't there yet. Never touches
+ * "Ready for Automated Outreach?", "Reviewed By", or "Reviewed At" --
+ * those stay entirely human-owned.
+ */
+async function writeOutreachReviewDetails(propertyAddress, details) {
+  requireSheetId();
+  const sheets = await getSheetsClient();
+  const { data: headerData } = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_REVIEW_SHEET_NAME}'!1:1`
+  });
+  const headerRow = await ensureOutreachReviewDetailColumns(sheets, (headerData.values || [[]])[0] || []);
+
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_REVIEW_SHEET_NAME}'`
+  });
+  const rows = data.values || [];
+  const addressColIndex = headerRow.indexOf('Address');
+  const target = normalizeAddress(propertyAddress);
+  let rowIndex = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (normalizeAddress(rows[i][addressColIndex] || '') === target) { rowIndex = i; break; }
+  }
+
+  const valuesToWrite = {
+    'Agent Name': details.agentName || '',
+    'Agent Phone': details.agentPhone || '',
+    'Agent Email': details.agentEmail || '',
+    'REI Notes Flag': details.reiNotesFlag || ''
+  };
+
+  if (rowIndex === -1) {
+    const newRow = new Array(headerRow.length).fill('');
+    newRow[addressColIndex] = propertyAddress;
+    Object.keys(valuesToWrite).forEach((h) => {
+      const idx = headerRow.indexOf(h);
+      if (idx !== -1) newRow[idx] = valuesToWrite[h];
+    });
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: config.sheets.sheetId,
+      range: `'${OUTREACH_REVIEW_SHEET_NAME}'!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [newRow] }
+    });
+    return;
+  }
+
+  const updates = [];
+  Object.keys(valuesToWrite).forEach((h) => {
+    const colIdx = headerRow.indexOf(h);
+    if (colIdx === -1) return;
+    updates.push({
+      range: `'${OUTREACH_REVIEW_SHEET_NAME}'!${columnIndexToLetter(colIdx)}${rowIndex + 1}`,
+      values: [[valuesToWrite[h]]]
+    });
+  });
+  if (updates.length > 0) {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: config.sheets.sheetId,
+      requestBody: { valueInputOption: 'RAW', data: updates }
+    });
+  }
+}
+
 module.exports = {
   getFlipScoutLeads,
-  updateContactedColumn,
   writeOutreachStatusSnapshot,
+  getRedfinAgentContacts,
+  getOutreachReviewRows,
+  writeOutreachReviewDetails,
   FLIP_SCOUT_SHEET_NAME,
   OUTREACH_STATUS_SHEET_NAME,
+  REDFIN_AGENT_CONTACTS_SHEET_NAME,
+  OUTREACH_REVIEW_SHEET_NAME,
   GOOD_FLIP_QUALITY
 };

@@ -21,7 +21,7 @@ var MAX_DAYS_ON_MARKET = 45;
  *   listingStatus, daysOnMarket, tenantOccupied, needsWork, appearsRenovated,
  *   compReviewCompleted, offerDate, disclosuresAvailable,
  *   agentName, agentPhone, agentEmail,
- *   isDuplicate, isSuppressed, doNotAutomate
+ *   isDuplicate, isSuppressed, doNotAutomate, reviewCleared
  * }
  *
  * Returns { status, reasons } where reasons explains every Needs Review /
@@ -42,42 +42,54 @@ function evaluateQualification(lead) {
     return { status: QUALIFICATION_STATUS.DUPLICATE, reasons: ['Outreach key already exists in the queue/log.'] };
   }
 
-  // Listing status
-  if (lead.listingStatus === undefined || lead.listingStatus === null || lead.listingStatus === '') {
-    reviewReasons.push('Listing status is missing.');
-  } else if (String(lead.listingStatus).toLowerCase() !== 'active') {
-    rejectedReasons.push('Listing status is not Active (' + lead.listingStatus + ').');
-  }
+  // Bryan + Juan already curate which Flip Scout leads are worth
+  // pursuing (Bryan sources/reviews them, periodically confirms with
+  // Juan which to move forward on) -- a lead marked "Yes" in the
+  // "Outreach Review" Sheet tab (see addFromFlipScout() in
+  // src/outreach/actions.js) reflects that curation already having
+  // happened, so the property/listing checks below -- which exist to
+  // verify things that curation already covers -- are skipped
+  // entirely for it. Agent contact info below is NOT skipped: without
+  // a phone number there's literally nothing to send outreach to,
+  // regardless of who cleared the lead.
+  if (lead.reviewCleared !== true) {
+    // Listing status
+    if (lead.listingStatus === undefined || lead.listingStatus === null || lead.listingStatus === '') {
+      reviewReasons.push('Listing status is missing.');
+    } else if (String(lead.listingStatus).toLowerCase() !== 'active') {
+      rejectedReasons.push('Listing status is not Active (' + lead.listingStatus + ').');
+    }
 
-  // Days on market
-  if (lead.daysOnMarket === undefined || lead.daysOnMarket === null || lead.daysOnMarket === '') {
-    reviewReasons.push('Days on market is missing.');
-  } else if (Number(lead.daysOnMarket) > MAX_DAYS_ON_MARKET) {
-    rejectedReasons.push('Days on market (' + lead.daysOnMarket + ') exceeds the ' + MAX_DAYS_ON_MARKET + '-day limit.');
-  }
+    // Days on market
+    if (lead.daysOnMarket === undefined || lead.daysOnMarket === null || lead.daysOnMarket === '') {
+      reviewReasons.push('Days on market is missing.');
+    } else if (Number(lead.daysOnMarket) > MAX_DAYS_ON_MARKET) {
+      rejectedReasons.push('Days on market (' + lead.daysOnMarket + ') exceeds the ' + MAX_DAYS_ON_MARKET + '-day limit.');
+    }
 
-  // Occupancy
-  if (lead.tenantOccupied === undefined || lead.tenantOccupied === null || lead.tenantOccupied === '') {
-    reviewReasons.push('Occupancy status is missing.');
-  } else if (lead.tenantOccupied === true) {
-    rejectedReasons.push('Property is tenant occupied.');
-  }
+    // Occupancy
+    if (lead.tenantOccupied === undefined || lead.tenantOccupied === null || lead.tenantOccupied === '') {
+      reviewReasons.push('Occupancy status is missing.');
+    } else if (lead.tenantOccupied === true) {
+      rejectedReasons.push('Property is tenant occupied.');
+    }
 
-  // Needs work / already renovated
-  if (lead.needsWork === undefined || lead.needsWork === null || lead.needsWork === '') {
-    reviewReasons.push('Property condition (needs work) is missing.');
-  } else if (lead.needsWork === false) {
-    rejectedReasons.push('Property does not need work.');
-  }
-  if (lead.appearsRenovated === true) {
-    rejectedReasons.push('Property already appears renovated.');
-  }
+    // Needs work / already renovated
+    if (lead.needsWork === undefined || lead.needsWork === null || lead.needsWork === '') {
+      reviewReasons.push('Property condition (needs work) is missing.');
+    } else if (lead.needsWork === false) {
+      rejectedReasons.push('Property does not need work.');
+    }
+    if (lead.appearsRenovated === true) {
+      rejectedReasons.push('Property already appears renovated.');
+    }
 
-  // Comparable-sales review
-  if (lead.compReviewCompleted === undefined || lead.compReviewCompleted === null || lead.compReviewCompleted === '') {
-    reviewReasons.push('One-mile comp review has not been recorded.');
-  } else if (lead.compReviewCompleted !== true) {
-    reviewReasons.push('One-mile comp review is not complete.');
+    // Comparable-sales review
+    if (lead.compReviewCompleted === undefined || lead.compReviewCompleted === null || lead.compReviewCompleted === '') {
+      reviewReasons.push('One-mile comp review has not been recorded.');
+    } else if (lead.compReviewCompleted !== true) {
+      reviewReasons.push('One-mile comp review is not complete.');
+    }
   }
 
   // Agent contact info

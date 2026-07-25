@@ -23,7 +23,17 @@ contextBridge.exposeInMainWorld('outreachApi', {
   getOutreachRow: (id) => ipcRenderer.invoke('outreach:get-row', id),
   listFlipScoutLeads: () => ipcRenderer.invoke('outreach:list-flip-scout-leads'),
   addFromFlipScout: (sheetRows, campaign) => ipcRenderer.invoke('outreach:add-from-flip-scout', { sheetRows, campaign }),
+  lookupRedfinAgentContact: (address) => ipcRenderer.invoke('outreach:lookup-redfin-agent-contact', address),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSetting: (key, value) => ipcRenderer.invoke('settings:set', { key, value }),
+  getCycleInterval: () => ipcRenderer.invoke('settings:get-cycle-interval'),
+  setCycleInterval: (minutes) => ipcRenderer.invoke('settings:set-cycle-interval', minutes),
+  startAutomation: () => ipcRenderer.invoke('automation:start'),
+  pauseAutomation: () => ipcRenderer.invoke('automation:pause'),
+  resumeAutomation: () => ipcRenderer.invoke('automation:resume'),
+  stopAutomation: () => ipcRenderer.invoke('automation:stop'),
   onLog: (cb) => ipcRenderer.on('log', (_event, payload) => cb(payload)),
   onJobStarted: (cb) => ipcRenderer.on('job-started', (_event, payload) => cb(payload)),
-  onJobFinished: (cb) => ipcRenderer.on('job-finished', (_event, payload) => cb(payload))
+  onJobFinished: (cb) => ipcRenderer.on('job-finished', (_event, payload) => cb(payload)),
+  onAutomationStatus: (cb) => ipcRenderer.on('automation-status', (_event, payload) => cb(payload))
 });

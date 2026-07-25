@@ -11,6 +11,7 @@ gmail-token-*.json
 .voice-profile/
 .voice-profile-*/
 .redfin-profile/
+.reiblackbook-profile/
 dist/
 data/*.json
 playwright-report/

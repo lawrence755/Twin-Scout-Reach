@@ -9,17 +9,19 @@
  * Bryan's FlipScoutSheet.js -- listFlipScoutLeads()/addFromFlipScout()
  * are the only functions here that touch the Sheet at all.
  */
+const { chromium } = require('playwright');
 const config = require('../config');
 const { evaluateQualification } = require('../../shared/qualification');
-const { isSuppressed, buildOutreachKey, buildContactKey } = require('../../shared/keys');
+const { isSuppressed, buildOutreachKey, buildContactKey, normalizeAddress } = require('../../shared/keys');
 const { canTransition } = require('../../shared/statusFlow');
 const { renderTemplate, extractMergeFields } = require('../../shared/templateEngine');
 const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
-const initialEmailTemplate = require('../../templates/initial-email.v1.json');
+const initialEmailTemplate = require('../../templates/initial-email.v2.json');
 const store = require('./store');
-const { getFlipScoutLeads, GOOD_FLIP_QUALITY, updateContactedColumn, writeOutreachStatusSnapshot } = require('../sheets/sheetsClient');
+const { getFlipScoutLeads, GOOD_FLIP_QUALITY, writeOutreachStatusSnapshot, getRedfinAgentContacts, getOutreachReviewRows, writeOutreachReviewDetails } = require('../sheets/sheetsClient');
 const gmailClient = require('../gmail/gmailClient');
 const { postToGoogleChat } = require('../notifications/googleChat');
+const { scrapeReiBlackBookContact, checkNotesForDoNotAutomate, getChatHistory, isInboundActivity, REI_PROFILE_DIR } = require('../reiblackbook/scrapeReiBlackBook');
 
 const PRE_APPROVAL_STATUSES = ['Information Needed', 'Needs Review', 'Ready for Drafting'];
 
@@ -52,12 +54,70 @@ async function listFlipScoutLeads() {
 }
 
 /**
+ * Loose address match (case/whitespace/street-suffix-insensitive, via
+ * shared/keys.js's normalizeAddress) against rows Cowork has fetched
+ * into the "Redfin Agent Contacts" tab. Returns null if nothing
+ * matches -- callers must not treat that as an error, just "no data
+ * yet for this address."
+ */
+function findRedfinAgentContact(propertyAddress, contacts) {
+  const target = normalizeAddress(propertyAddress);
+  if (!target) return null;
+  return (contacts || []).find((c) => normalizeAddress(c.propertyAddress) === target) || null;
+}
+
+/**
+ * Looks up one address in the "Outreach Review" tab -- the authoritative,
+ * human-set gate for whether a lead is actually clear for automated
+ * outreach (separate from Flip Scout Leads itself, which stays owned
+ * by Bryan's script -- see docs). Anything other than an explicit
+ * "Yes" blocks automation, including a blank/not-yet-reviewed row --
+ * the safer default is "not cleared" until a human says otherwise.
+ */
+function findOutreachReviewStatus(propertyAddress, reviewRows) {
+  const target = normalizeAddress(propertyAddress);
+  if (!target) return null;
+  return (reviewRows || []).find((r) => normalizeAddress(r.propertyAddress) === target) || null;
+}
+
+/**
+ * Looks up one address in "Redfin Agent Contacts" -- used by the Add/
+ * Edit Row form's "Fill from Redfin sheet" button so a human can pull
+ * Cowork's fetched data into an existing or in-progress row, review
+ * it, and edit/save it themselves rather than have it applied silently.
+ */
+async function lookupRedfinAgentContact(propertyAddress) {
+  const contacts = await getRedfinAgentContacts();
+  return findRedfinAgentContact(propertyAddress, contacts);
+}
+
+/**
  * Pulls selected Flip Scout Leads rows (by sheetRow) into the local
  * Outreach Queue -- the app-side equivalent of "Add selected Flip
- * Scout rows." Only property/city/Redfin link/campaign are prefilled;
- * agent contact info and the Phase 3 verification fields are still
- * added by hand afterward (same as the original design -- a human
- * verifies those, nothing here guesses at them).
+ * Scout rows." Property/city/Redfin link/campaign are always
+ * prefilled; agent contact info is best-effort prefilled too, in this
+ * order of trust:
+ *
+ *   1. Bryan's REI BlackBook, when the lead has a "REI Link & Agent
+ *      Name" -- his real CRM contact for this agent. Agent name comes
+ *      across immediately; phone/email land later via
+ *      enrichFromReiBlackBook() (that's a separate page visit, not
+ *      part of this Sheet read).
+ *   2. Otherwise, whatever Cowork has already fetched into "Redfin
+ *      Agent Contacts" (matched by address) -- name, phone, and email
+ *      all available immediately, since that data's already scraped.
+ *
+ * Either way this lands in the row exactly like hand-typed agent info
+ * would: still editable, still needing a human to review it before
+ * outreach is sent. If neither source has a match, leads still get
+ * added with agent info blank for manual entry, same as always.
+ *
+ * Also checks the "Outreach Review" tab (separate from Flip Scout
+ * Leads/REI BlackBook) for an explicit "Ready for Automated Outreach?"
+ * decision, keyed by address. Anything other than exactly "Yes" --
+ * including no row at all yet -- sets doNotAutomate on the new row, so
+ * a lead is blocked from any auto-send path by default until a human
+ * clears it there.
  */
 async function addFromFlipScout(sheetRows, campaign) {
   const leads = await getFlipScoutLeads((l) => sheetRows.includes(l.__sheetRow));
@@ -65,9 +125,35 @@ async function addFromFlipScout(sheetRows, campaign) {
   const added = [];
   const skipped = [];
 
+  let redfinContacts = [];
+  try {
+    redfinContacts = await getRedfinAgentContacts();
+  } catch (err) {
+    // Best-effort only -- see doc comment above.
+  }
+  let reviewRows = [];
+  try {
+    reviewRows = await getOutreachReviewRows();
+  } catch (err) {
+    // Best-effort only -- if the Outreach Review tab isn't reachable,
+    // fall through to the safer default below (blocked) rather than
+    // silently treating every lead as cleared.
+  }
+
   for (const lead of leads) {
-    const outreachKey = buildOutreachKey('', lead.propertyAddress, campaign || 'flip-scout');
-    // No agent phone yet at this point, so outreachKey/contactKey are
+    const hasReiLink = !!lead.reiContactLink;
+    const redfinMatch = hasReiLink ? null : findRedfinAgentContact(lead.propertyAddress, redfinContacts);
+    const agentName = hasReiLink ? lead.reiAgentName : (redfinMatch ? redfinMatch.agentName : undefined);
+    const agentPhone = redfinMatch ? redfinMatch.agentPhone : '';
+    const agentEmail = redfinMatch ? redfinMatch.agentEmail : undefined;
+    const outreachKey = buildOutreachKey(agentPhone, lead.propertyAddress, campaign || 'flip-scout');
+
+    const review = findOutreachReviewStatus(lead.propertyAddress, reviewRows);
+    const isCleared = review && String(review.readyForAutomatedOutreach || '').trim().toLowerCase() === 'yes';
+    const doNotAutomate = isCleared ? undefined : 'TRUE';
+    const doNotAutomateReason = isCleared ? undefined
+      : (review ? 'Outreach Review sheet: "' + review.readyForAutomatedOutreach + '"' : 'Outreach Review sheet: not yet reviewed');
+    // If agent phone is still unknown, outreachKey/contactKey are
     // placeholders -- refreshValidation recomputes duplicate-detection
     // once agent phone is filled in; this just prevents re-adding the
     // exact same address+campaign combo before that happens.
@@ -82,8 +168,20 @@ async function addFromFlipScout(sheetRows, campaign) {
       city: lead.city,
       redfinLink: lead.redfinLink,
       campaign: campaign || 'flip-scout',
-      flipScoutRowRef: lead.sheetRow,
+      flipScoutRowRef: lead.__sheetRow,
+      agentName,
+      agentPhone: agentPhone || undefined,
+      agentEmail,
+      reiContactLink: lead.reiContactLink || undefined,
+      doNotAutomate,
+      doNotAutomateReason,
+      // Bryan + Juan already curate which leads to pursue -- a "Yes"
+      // here (see evaluateQualification's own comment on this) means
+      // the granular Phase 3 property/listing checks get skipped
+      // entirely for this row, since that curation already covers it.
+      reviewCleared: isCleared ? 'TRUE' : undefined,
       outreachKey,
+      contactKey: agentPhone ? buildContactKey(agentPhone) : undefined,
       dateAdded: now,
       lastUpdated: now
     });
@@ -91,6 +189,146 @@ async function addFromFlipScout(sheetRows, campaign) {
     added.push(row);
   }
   return { added, skipped };
+}
+
+/**
+ * Automated equivalent of a human browsing Flip Scout Leads, checking
+ * the "Good Flip" leads, and clicking "Add selected to Outreach
+ * Queue" -- used by the continuous automation loop (app/automationLoop.js)
+ * so new leads keep flowing into the queue without that manual step.
+ *
+ * Filters by flipScoutRowRef (the sheet row reference every queued
+ * row already carries) BEFORE calling addFromFlipScout(), not after --
+ * addFromFlipScout()'s own duplicate check only compares outreachKey,
+ * which is blank until a phone number exists. A freshly auto-queued
+ * lead has no phone yet, so its blank key would never match anything,
+ * and without this pre-filter the same Flip Scout row would get
+ * re-added as a brand new queue row on every single cycle.
+ */
+async function autoQueueFromFlipScout() {
+  const leads = await listFlipScoutLeads();
+  const existingRefs = new Set(store.getQueueRows().map((r) => r.flipScoutRowRef).filter(Boolean));
+  const candidates = leads.filter((l) => l.isGoodFlip && !existingRefs.has(l.sheetRow));
+  if (candidates.length === 0) return { added: [], skipped: [] };
+  return addFromFlipScout(candidates.map((l) => l.sheetRow), 'auto-queue');
+}
+
+/**
+ * Visits every Outreach Queue row that has a REI BlackBook contact
+ * link but no agent phone yet, and fills in phone/email read off that
+ * contact's real page (see src/reiblackbook/scrapeReiBlackBook.js).
+ * Also writes those same details into the "Outreach Review" Sheet tab
+ * (see writeOutreachReviewDetails) -- so whoever reviews a lead there
+ * to decide "Ready for Automated Outreach?" already has what REI
+ * BlackBook knows about the agent, without needing to separately open
+ * REI BlackBook themselves. Requires a human to have already logged
+ * into REI BlackBook once via scripts/login-reiblackbook.js -- this
+ * never logs in itself, and stops per-row (not the whole run) if a
+ * row can't be read, so one bad link doesn't block the rest of the
+ * batch.
+ */
+async function enrichFromReiBlackBook() {
+  const rows = store.getQueueRows((r) => r.reiContactLink && !r.agentPhone);
+  if (rows.length === 0) return { updated: 0, failed: 0, results: [] };
+
+  // Visible, not headless -- same reasoning as the Redfin scraper: if
+  // the session has quietly expired or REI BlackBook's layout changed,
+  // a human watching the window notices immediately instead of just
+  // getting a cryptic per-row failure.
+  const context = await chromium.launchPersistentContext(REI_PROFILE_DIR, { headless: false });
+  const results = [];
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    for (const row of rows) {
+      try {
+        const info = await scrapeReiBlackBookContact(page, row.reiContactLink);
+        // Goes through updateRow(), not a direct store write -- agent
+        // phone is changing here, and outreachKey/contactKey must be
+        // recomputed from it (see updateRow()'s own comment on this;
+        // a direct store write would leave both permanently blank,
+        // same false-duplicate bug fixed earlier for manual edits).
+        await updateRow(row.id, {
+          agentPhone: info.agentPhone || row.agentPhone,
+          agentEmail: info.agentEmail || row.agentEmail
+        });
+        try {
+          await writeOutreachReviewDetails(row.propertyAddress, {
+            agentName: row.agentName,
+            agentPhone: info.agentPhone || row.agentPhone,
+            agentEmail: info.agentEmail || row.agentEmail
+          });
+        } catch (sheetErr) {
+          // Best-effort -- the local queue row is already correct
+          // either way; the Sheet is a convenience mirror for reviewers.
+        }
+        results.push({ propertyAddress: row.propertyAddress, ok: true, ...info });
+      } catch (err) {
+        results.push({ propertyAddress: row.propertyAddress, ok: false, error: err.message });
+      }
+    }
+  } finally {
+    await context.close();
+  }
+  return {
+    updated: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results
+  };
+}
+
+/**
+ * Visits every Outreach Queue row that has a REI BlackBook contact
+ * link and checks its Notes tab for an explicit directive against
+ * automating outreach (e.g. "Do not begin automated seller outreach"
+ * -- a real note found on a live contact, not a hypothetical). This
+ * is a compliance gate, not informational: a match sets the row's
+ * existing doNotAutomate flag, which evaluateQualification() already
+ * checks everywhere outreach gets sent. Only ever sets the flag on --
+ * never clears it back off automatically, since a human may have set
+ * it for other reasons this scan wouldn't know about. Re-checking
+ * (not just once at enrichment time) matters because new notes can
+ * get added to a contact after the row was first added.
+ */
+async function checkReiBlackBookNotes() {
+  const rows = store.getQueueRows((r) => r.reiContactLink);
+  if (rows.length === 0) return { checked: 0, flagged: 0, results: [] };
+
+  const context = await chromium.launchPersistentContext(REI_PROFILE_DIR, { headless: false });
+  const results = [];
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    for (const row of rows) {
+      try {
+        const signal = await checkNotesForDoNotAutomate(page, row.reiContactLink);
+        if (signal.doNotAutomate && !coerceBoolean(row.doNotAutomate)) {
+          await updateRow(row.id, {
+            doNotAutomate: 'TRUE',
+            doNotAutomateReason: 'REI BlackBook note: "' + signal.matchedText + '"'
+          });
+        }
+        try {
+          await writeOutreachReviewDetails(row.propertyAddress, {
+            agentName: row.agentName,
+            agentPhone: row.agentPhone,
+            agentEmail: row.agentEmail,
+            reiNotesFlag: signal.doNotAutomate ? signal.matchedText : ''
+          });
+        } catch (sheetErr) {
+          // Best-effort -- see enrichFromReiBlackBook()'s identical note.
+        }
+        results.push({ propertyAddress: row.propertyAddress, ok: true, flagged: signal.doNotAutomate, matchedText: signal.matchedText });
+      } catch (err) {
+        results.push({ propertyAddress: row.propertyAddress, ok: false, error: err.message });
+      }
+    }
+  } finally {
+    await context.close();
+  }
+  return {
+    checked: results.length,
+    flagged: results.filter((r) => r.flagged).length,
+    results
+  };
 }
 
 /**
@@ -164,7 +402,8 @@ async function refreshValidation() {
       agentEmail: row.agentEmail,
       isDuplicate: duplicateCount > 1,
       isSuppressed: isSuppressed(row.agentPhone, suppressionList),
-      doNotAutomate: coerceBoolean(row.doNotAutomate)
+      doNotAutomate: coerceBoolean(row.doNotAutomate),
+      reviewCleared: coerceBoolean(row.reviewCleared)
     };
 
     const result = evaluateQualification(lead);
@@ -362,33 +601,6 @@ async function notifyGoogleChat(text) {
  * other status -- once a row leaves Contacted, it's not reconsidered.
  */
 /**
- * Mirrors current outreach status back into the Flip Scout Leads
- * sheet's "Contacted?" column so Bryan/the team can see progress
- * without opening the app -- Handed Off wins if two Outreach Queue
- * rows share an address with different statuses (more informative
- * than "Following Up" once a human has actually taken over). Runs
- * regardless of whether there were any new Gmail replies to check,
- * since existing rows' status can still need re-syncing.
- */
-async function syncContactedColumn() {
-  const statusByAddress = {};
-  for (const r of store.getQueueRows(() => true)) {
-    let sheetStatus = null;
-    if (r.status === 'Handed Off') sheetStatus = 'Handed Off';
-    else if (['Contacted', 'Follow-Up Due', 'Replied'].includes(r.status)) sheetStatus = 'Following Up';
-    if (!sheetStatus) continue;
-    if (statusByAddress[r.propertyAddress] !== 'Handed Off') {
-      statusByAddress[r.propertyAddress] = sheetStatus;
-    }
-  }
-  try {
-    return await updateContactedColumn(statusByAddress);
-  } catch (err) {
-    return { error: err.message };
-  }
-}
-
-/**
  * Full-overwrite mirror of every Outreach Queue row that has agent
  * info into the app-owned "Outreach Status" tab -- read-only
  * reporting, not a second source of truth (see writeOutreachStatusSnapshot).
@@ -423,7 +635,6 @@ async function checkReplies() {
   const rows = store.getQueueRows((r) => r.status === 'Contacted');
   if (rows.length === 0) {
     const results = [];
-    results.sheetSync = await syncContactedColumn();
     results.statusTabSync = await syncOutreachStatusTab();
     return results;
   }
@@ -477,7 +688,80 @@ async function checkReplies() {
     }
   }
 
-  results.sheetSync = await syncContactedColumn();
+  results.statusTabSync = await syncOutreachStatusTab();
+  return results;
+}
+
+/**
+ * REI BlackBook equivalent of checkReplies() above -- same routing
+ * rules (YES -> Handed Off, NO/opt-out -> Opted Out, anything else ->
+ * Replied for a human, 3 days of silence -> Follow-Up Due) and the
+ * same Google Chat notification on YES/NO, but reads the reply from
+ * REI BlackBook's own Chat history instead of a Gmail notification
+ * email. Only touches rows reached via REI BlackBook (reiContactLink
+ * set) -- checkReplies() still owns everything else. Requires a human
+ * to have logged into REI BlackBook already; stops per-row, not the
+ * whole run, if a contact's history can't be read.
+ */
+async function checkReiBlackBookReplies() {
+  const rows = store.getQueueRows((r) => r.status === 'Contacted' && r.reiContactLink);
+  if (rows.length === 0) {
+    const results = [];
+    results.statusTabSync = await syncOutreachStatusTab();
+    return results;
+  }
+
+  const now = new Date();
+  const results = [];
+  const context = await chromium.launchPersistentContext(REI_PROFILE_DIR, { headless: false });
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    for (const row of rows) {
+      const contactedAt = row.contactedAt ? new Date(row.contactedAt) : null;
+      let activity;
+      try {
+        activity = await getChatHistory(page, row.reiContactLink);
+      } catch (err) {
+        results.push({ id: row.id, address: row.propertyAddress, result: 'Error', error: err.message });
+        continue;
+      }
+      const inboundReplies = activity
+        .filter((a) => isInboundActivity(a) && (!contactedAt || new Date(a.created_at) >= contactedAt))
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      if (inboundReplies.length > 0) {
+        const replyText = String(inboundReplies[0].body || '').trim();
+        const classification = classifyReply(replyText);
+        const timestamp = new Date().toISOString();
+
+        if (classification === 'yes') {
+          store.updateQueueRow(row.id, { status: 'Handed Off', qualificationReasons: 'Auto-routed: reply was "' + replyText + '"', lastUpdated: timestamp });
+          const notifyError = await notifyGoogleChat(
+            'Positive reply (REI BlackBook): ' + row.agentName + ' (' + row.agentPhone + ') on ' + row.propertyAddress +
+            ' replied "' + replyText + '" -- time to follow up directly.'
+          );
+          results.push({ id: row.id, address: row.propertyAddress, result: 'Handed Off', replyText, notifyError });
+        } else if (classification === 'no') {
+          store.updateQueueRow(row.id, { status: 'Opted Out', qualificationReasons: 'Auto-routed: reply was "' + replyText + '"', lastUpdated: timestamp });
+          const notifyError = await notifyGoogleChat(
+            'Opt-out (REI BlackBook): ' + row.agentName + ' (' + row.agentPhone + ') on ' + row.propertyAddress +
+            ' replied "' + replyText + '" -- marked Opted Out, no further outreach will be sent.'
+          );
+          results.push({ id: row.id, address: row.propertyAddress, result: 'Opted Out', replyText, notifyError });
+        } else {
+          store.updateQueueRow(row.id, { status: 'Replied', qualificationReasons: 'Reply needs human review: "' + replyText + '"', lastUpdated: timestamp });
+          results.push({ id: row.id, address: row.propertyAddress, result: 'Replied (needs review)', replyText });
+        }
+      } else if (contactedAt && (now - contactedAt) >= FOLLOWUP_AFTER_MS) {
+        store.updateQueueRow(row.id, { status: 'Follow-Up Due', lastUpdated: new Date().toISOString() });
+        results.push({ id: row.id, address: row.propertyAddress, result: 'Follow-Up Due' });
+      } else {
+        results.push({ id: row.id, address: row.propertyAddress, result: 'No reply yet' });
+      }
+    }
+  } finally {
+    await context.close();
+  }
   results.statusTabSync = await syncOutreachStatusTab();
   return results;
 }
@@ -499,6 +783,10 @@ function getRow(id) {
 module.exports = {
   listFlipScoutLeads,
   addFromFlipScout,
+  autoQueueFromFlipScout,
+  lookupRedfinAgentContact,
+  enrichFromReiBlackBook,
+  checkReiBlackBookNotes,
   addRow,
   updateRow,
   getRow,
@@ -507,6 +795,7 @@ module.exports = {
   approveOutreach,
   sendApprovedEmails,
   checkReplies,
+  checkReiBlackBookReplies,
   listRows,
   extractReplyText,
   classifyReply

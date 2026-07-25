@@ -66,6 +66,37 @@ body {
 .flag:not(.on) .flag-value { color: var(--muted); }
 .flag.on .flag-value { color: var(--danger); }
 
+/* ---------- Settings toggles ---------- */
+.toggle-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.toggle-info { display: flex; flex-direction: column; gap: 2px; }
+.toggle-title { font-weight: 600; }
+.toggle-desc { color: var(--muted); font-size: 0.78rem; }
+
+.switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-track {
+  position: absolute; inset: 0; cursor: pointer;
+  background: var(--border); border-radius: 999px; transition: background 0.15s;
+}
+.switch-track::before {
+  content: ""; position: absolute; left: 3px; top: 3px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--text); transition: transform 0.15s;
+}
+.switch input:checked + .switch-track { background: var(--danger); }
+.switch input:checked + .switch-track::before { transform: translateX(18px); }
+.switch input:disabled + .switch-track { opacity: 0.5; cursor: not-allowed; }
+
 /* ---------- Tabs ---------- */
 .tabs {
   display: flex;

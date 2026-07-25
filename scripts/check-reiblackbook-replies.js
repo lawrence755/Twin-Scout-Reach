@@ -1,24 +1,25 @@
 #!/usr/bin/env node
 /**
- * Checks Gmail for Google Voice reply notifications matching any row
- * currently "Contacted", and routes each one forward (see
- * src/outreach/actions.js#checkReplies for the exact rules) or moves
- * it to Follow-Up Due once three days have passed with no reply.
+ * REI BlackBook equivalent of scripts/check-replies.js -- checks
+ * every "Contacted" row reached via REI BlackBook for a real inbound
+ * reply and routes it (see src/outreach/actions.js#checkReiBlackBookReplies
+ * for the exact rules) or moves it to Follow-Up Due after three days
+ * of silence.
  *
- * Requires Gmail to already be authorized (`npm run gmail:authorize`)
- * with the widened scope that includes gmail.readonly -- re-run
- * authorize once if this was authorized before that scope was added.
+ * Requires a human to have already logged into REI BlackBook once via
+ * `npm run reiblackbook:login`.
  */
 const actions = require('../src/outreach/actions');
 
-actions.checkReplies()
+actions.checkReiBlackBookReplies()
   .then((results) => {
     if (results.length === 0) {
-      console.log('No rows are currently "Contacted" -- nothing to check.');
+      console.log('No rows are currently "Contacted" via REI BlackBook -- nothing to check.');
     } else {
       results.forEach((r) => {
         console.log(r.address + ' -> ' + r.result + (r.replyText ? ' -- reply: "' + r.replyText + '"' : ''));
         if (r.notifyError) console.warn('  Google Chat notification failed: ' + r.notifyError);
+        if (r.error) console.warn('  Failed: ' + r.error);
       });
     }
     if (results.statusTabSync) {
@@ -27,6 +28,6 @@ actions.checkReplies()
     }
   })
   .catch((err) => {
-    console.error('Failed to check replies:', err.message);
+    console.error('Failed to check REI BlackBook replies:', err.message);
     process.exitCode = 1;
   });

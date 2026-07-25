@@ -10,11 +10,14 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { JobRunner, readEnvFlags } = require('./jobRunner');
+const { JobRunner } = require('./jobRunner');
+const { AutomationLoop } = require('./automationLoop');
 const outreachActions = require('../src/outreach/actions');
+const envSettings = require('./envSettings');
 
 const PORT = Number(process.env.APP_PORT || 4747);
 const runner = new JobRunner();
+const automationLoop = new AutomationLoop(runner);
 const sseClients = new Set();
 
 function broadcast(event) {
@@ -25,6 +28,8 @@ function broadcast(event) {
 runner.on('job-started', (p) => broadcast({ type: 'job-started', ...p }));
 runner.on('job-finished', (p) => broadcast({ type: 'job-finished', ...p }));
 runner.on('log', (p) => broadcast({ type: 'log', ...p }));
+automationLoop.on('log', (p) => broadcast({ type: 'log', ...p }));
+automationLoop.on('status-changed', (p) => broadcast({ type: 'automation-status', ...p }));
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -42,8 +47,9 @@ function getStatus() {
   return {
     running: runner.isRunning(),
     jobs: runner.listJobs(),
-    flags: readEnvFlags(),
-    sheetId: process.env.GOOGLE_SHEET_ID || ''
+    flags: envSettings.getToggleSettings(),
+    sheetId: process.env.GOOGLE_SHEET_ID || '',
+    automation: automationLoop.getStatus()
   };
 }
 
@@ -67,6 +73,51 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(getStatus()));
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/settings') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(envSettings.getToggleSettings()));
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/settings') {
+    try {
+      const body = await readJsonBody(req);
+      const settings = envSettings.setToggleSetting(body.key, body.value);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, settings }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/settings/cycle-interval') {
+    try {
+      const body = await readJsonBody(req);
+      const minutes = envSettings.setCycleIntervalMinutes(body.minutes);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, minutes }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
+
+  const automationRoutes = {
+    '/automation/start': () => { automationLoop.start(); return automationLoop.getStatus(); },
+    '/automation/pause': () => { automationLoop.pause(); return automationLoop.getStatus(); },
+    '/automation/resume': () => { automationLoop.resume(); return automationLoop.getStatus(); },
+    '/automation/stop': () => { automationLoop.stop(); return automationLoop.getStatus(); }
+  };
+  if (req.method === 'POST' && automationRoutes[url.pathname]) {
+    const status = automationRoutes[url.pathname]();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, status }));
     return;
   }
 
@@ -149,6 +200,18 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  if (req.method === 'GET' && url.pathname === '/outreach/redfin-agent-contact') {
+    try {
+      const address = url.searchParams.get('address') || '';
+      const contact = await outreachActions.lookupRedfinAgentContact(address);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, contact }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
   if (req.method === 'GET' && url.pathname === '/outreach/flip-scout-leads') {
     try {
       const leads = await outreachActions.listFlipScoutLeads();
@@ -180,3 +243,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log('Outreach control panel running at http://127.0.0.1:' + PORT);
 });
+
+process.on('SIGINT', () => { automationLoop.stop(); process.exit(0); });
+process.on('SIGTERM', () => { automationLoop.stop(); process.exit(0); });

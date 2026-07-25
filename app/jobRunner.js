@@ -12,7 +12,11 @@ const { EventEmitter } = require('events');
 const ROOT = path.resolve(__dirname, '..');
 
 const JOBS = {
-  'redfin-enrich': { script: 'src/redfin/enrichAgentContacts.js', label: 'Enrich agent contacts (Redfin)' },
+  'reiblackbook-login': { script: 'scripts/login-reiblackbook.js', label: 'Log into REI BlackBook (opens a real browser window)' },
+  'reiblackbook-enrich': { script: 'scripts/enrich-reiblackbook.js', label: 'Enrich agent contacts (REI BlackBook)' },
+  'reiblackbook-check-notes': { script: 'scripts/check-reiblackbook-notes.js', label: 'Check REI BlackBook notes for do-not-automate flags' },
+  'reiblackbook-check-replies': { script: 'scripts/check-reiblackbook-replies.js', label: 'Check for replies (REI BlackBook)' },
+  'reiblackbook-autosend': { script: 'src/reiblackbook/autoSendReiBlackBookMessage.js', label: 'Auto-send texts via REI BlackBook (clicks Send)' },
   'voice-prepare': { script: 'src/voice/prepareGoogleVoiceMessage.js', label: 'Prepare Google Voice texts (stops before Send)' },
   'voice-autosend': { script: 'src/voice/autoSendGoogleVoiceMessage.js', label: 'Auto-send Google Voice texts (clicks Send)' }
 };

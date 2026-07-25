@@ -104,7 +104,8 @@ async function buildEligibleMessages() {
       agentEmail: row.agentEmail,
       isDuplicate: duplicateCount > 1,
       isSuppressed: isSuppressed(row.agentPhone, suppressionList),
-      doNotAutomate: coerceBoolean(row.doNotAutomate)
+      doNotAutomate: coerceBoolean(row.doNotAutomate),
+      reviewCleared: coerceBoolean(row.reviewCleared)
     };
 
     const qualification = evaluateQualification(lead);

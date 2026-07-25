@@ -34,6 +34,7 @@
       <button class="tab-btn" data-tab="flip-scout" role="tab">Flip Scout Leads</button>
       <button class="tab-btn" data-tab="outreach" role="tab">Outreach Queue</button>
       <button class="tab-btn" data-tab="automation" role="tab">Automation</button>
+      <button class="tab-btn" data-tab="settings" role="tab">Settings</button>
     </nav>
 
     <main class="tab-content">
@@ -155,31 +156,129 @@
 
       <!-- ---------------- Automation ---------------- -->
       <section id="tab-automation" class="tab-pane">
+        <div class="panel" id="automation-loop-panel">
+          <div class="panel-header">
+            <h2>Continuous Automation Loop</h2>
+            <span class="muted-tag" id="automation-loop-status">Stopped</span>
+          </div>
+          <p class="note">Cycles through auto-queueing new Flip Scout leads, validating, submitting/approving, REI BlackBook enrich/notes/replies/send, email send, and (if Voice Automation is on) Google Voice -- automatically, on a timer. Every real send step is still gated by its own <code>ENABLE_*</code> flag and the "Outreach Review" sheet exactly as it is for the one-shot buttons below.</p>
+          <div class="toolbar">
+            <label class="checkbox-label">
+              Cycle interval (minutes)
+              <input type="number" id="cycle-interval-input" class="input" min="1" style="width:80px;" />
+            </label>
+            <button id="automation-start-btn" class="btn btn-primary">Start</button>
+            <button id="automation-pause-resume-btn" class="btn btn-secondary" disabled>Pause</button>
+            <button id="automation-stop-btn" class="btn btn-danger-outline" disabled>Stop</button>
+          </div>
+        </div>
+
         <div class="panel">
           <h2>Automation Jobs</h2>
           <div class="job-grid">
-            <button data-job="redfin-enrich" class="btn btn-secondary job-btn">
-              Enrich agent contacts (Redfin)
+            <button data-job="reiblackbook-login" class="btn btn-secondary job-btn">
+              Log into REI BlackBook
+              <small>opens a real browser window -- log in by hand</small>
             </button>
-            <button data-job="voice-prepare" class="btn btn-secondary job-btn">
-              Prepare Google Voice texts
-              <small>stops before Send</small>
+            <button data-job="reiblackbook-enrich" class="btn btn-secondary job-btn">
+              Enrich agent contacts (REI BlackBook)
+              <small>requires logging in above first</small>
+            </button>
+            <button data-job="reiblackbook-check-notes" class="btn btn-secondary job-btn">
+              Check REI BlackBook notes for do-not-automate flags
+              <small>sets Do Not Automate when a note says so</small>
+            </button>
+            <button data-job="reiblackbook-check-replies" class="btn btn-secondary job-btn">
+              Check for replies (REI BlackBook)
+              <small>routes YES/NO, notifies Google Chat, flags Follow-Up Due</small>
             </button>
 
             <div class="danger-box">
               <label class="checkbox-label">
-                <input type="checkbox" id="autosend-confirm" />
-                I understand this sends real texts immediately, with no review.
+                <input type="checkbox" id="rei-autosend-confirm" />
+                I understand this sends real texts via REI BlackBook immediately, with no review.
               </label>
-              <button data-job="voice-autosend" class="btn btn-danger job-btn" id="autosend-btn" disabled>
-                Auto-send Google Voice texts
+              <button data-job="reiblackbook-autosend" class="btn btn-danger job-btn" id="rei-autosend-btn" disabled>
+                Auto-send REI BlackBook texts
                 <small>clicks Send -- no confirmation</small>
               </button>
             </div>
+
+            <div id="google-voice-section" class="voice-section" style="display:none;">
+              <button data-job="voice-prepare" class="btn btn-secondary job-btn">
+                Prepare Google Voice texts
+                <small>stops before Send</small>
+              </button>
+
+              <div class="danger-box">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="autosend-confirm" />
+                  I understand this sends real texts immediately, with no review.
+                </label>
+                <button data-job="voice-autosend" class="btn btn-danger job-btn" id="autosend-btn" disabled>
+                  Auto-send Google Voice texts
+                  <small>clicks Send -- no confirmation</small>
+                </button>
+              </div>
+            </div>
+            <p class="note" id="google-voice-hidden-note">Google Voice is currently hidden -- turn on "Enable Voice Automation" in Settings to show it here.</p>
           </div>
           <div class="job-footer">
             <button id="stop-btn" class="btn btn-danger-outline" disabled>Stop current job</button>
           </div>
+        </div>
+      </section>
+
+      <!-- ---------------- Settings ---------------- -->
+      <section id="tab-settings" class="tab-pane">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Live-Sending Switches</h2>
+            <span class="muted-tag">Written straight to .env -- takes effect on the next job run, no restart needed</span>
+          </div>
+          <div class="toggle-list" id="settings-toggle-list">
+            <div class="toggle-row" data-key="ENABLE_EMAIL_SENDING">
+              <div class="toggle-info">
+                <span class="toggle-title">Enable Email Sending</span>
+                <span class="toggle-desc">Master switch for sending approved outreach emails via Gmail.</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" />
+                <span class="switch-track"></span>
+              </label>
+            </div>
+            <div class="toggle-row" data-key="ENABLE_VOICE_AUTOMATION">
+              <div class="toggle-info">
+                <span class="toggle-title">Enable Voice Automation</span>
+                <span class="toggle-desc">Allows Google Voice preparation/automation to run at all.</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" />
+                <span class="switch-track"></span>
+              </label>
+            </div>
+            <div class="toggle-row" data-key="ENABLE_AUTO_SMS_SEND">
+              <div class="toggle-info">
+                <span class="toggle-title">Auto-send Google Voice Texts</span>
+                <span class="toggle-desc">Clicks Send in Google Voice with no per-message confirmation.</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" />
+                <span class="switch-track"></span>
+              </label>
+            </div>
+            <div class="toggle-row" data-key="ENABLE_REI_SMS_SEND">
+              <div class="toggle-info">
+                <span class="toggle-title">Auto-send REI BlackBook Texts</span>
+                <span class="toggle-desc">Clicks Send Text in REI BlackBook's Chat tab with no per-message confirmation.</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" />
+                <span class="switch-track"></span>
+              </label>
+            </div>
+          </div>
+          <p class="note">This is the real switch the scripts check at runtime -- separate from, and in addition to, the "I understand" checkbox on the Automation tab. Both must be on for an auto-send job to actually send anything; with either off, it only prints a dry-run list of what would send.</p>
         </div>
       </section>
     </main>

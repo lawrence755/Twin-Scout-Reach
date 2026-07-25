@@ -11,7 +11,7 @@
   }
 
   function buildHttpApi() {
-    const listeners = { log: [], 'job-started': [], 'job-finished': [] };
+    const listeners = { log: [], 'job-started': [], 'job-finished': [], 'automation-status': [] };
     const source = new EventSource('/events');
     source.onmessage = (event) => {
       const payload = JSON.parse(event.data);
@@ -43,9 +43,22 @@
       listFlipScoutLeads: () => fetch('/outreach/flip-scout-leads').then((r) => r.json()),
       addFromFlipScout: (sheetRows, campaign) =>
         fetch('/outreach/add-from-flip-scout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sheetRows, campaign }) }).then((r) => r.json()),
+      lookupRedfinAgentContact: (address) =>
+        fetch('/outreach/redfin-agent-contact?address=' + encodeURIComponent(address)).then((r) => r.json()),
+      getSettings: () => fetch('/settings').then((r) => r.json()),
+      setSetting: (key, value) =>
+        fetch('/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) }).then((r) => r.json()),
+      getCycleInterval: () => fetch('/status').then((r) => r.json()).then((s) => s.automation.cycleIntervalMinutes),
+      setCycleInterval: (minutes) =>
+        fetch('/settings/cycle-interval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ minutes }) }).then((r) => r.json()),
+      startAutomation: () => fetch('/automation/start', { method: 'POST' }).then((r) => r.json()),
+      pauseAutomation: () => fetch('/automation/pause', { method: 'POST' }).then((r) => r.json()),
+      resumeAutomation: () => fetch('/automation/resume', { method: 'POST' }).then((r) => r.json()),
+      stopAutomation: () => fetch('/automation/stop', { method: 'POST' }).then((r) => r.json()),
       onLog: (cb) => listeners.log.push(cb),
       onJobStarted: (cb) => listeners['job-started'].push(cb),
-      onJobFinished: (cb) => listeners['job-finished'].push(cb)
+      onJobFinished: (cb) => listeners['job-finished'].push(cb),
+      onAutomationStatus: (cb) => listeners['automation-status'].push(cb)
     };
   }
 
@@ -67,6 +80,8 @@
   const stopBtn = document.getElementById('stop-btn');
   const autosendConfirm = document.getElementById('autosend-confirm');
   const autosendBtn = document.getElementById('autosend-btn');
+  const reiAutosendConfirm = document.getElementById('rei-autosend-confirm');
+  const reiAutosendBtn = document.getElementById('rei-autosend-btn');
 
   function appendLog(cls, text) {
     const line = document.createElement('div');
@@ -76,9 +91,20 @@
     logEl.scrollTop = logEl.scrollHeight;
   }
 
+  let lastKnownRunning = false;
+  let automationActive = false; // true whenever the loop is 'running' or 'paused' -- not 'stopped'
+
   function setRunningState(isRunning) {
-    document.querySelectorAll('.job-btn').forEach((btn) => { btn.disabled = isRunning; });
-    if (!isRunning) autosendBtn.disabled = !autosendConfirm.checked;
+    lastKnownRunning = isRunning;
+    // One-shot job buttons stay disabled while either a single job is
+    // running OR the automation loop owns job execution (running/paused)
+    // -- avoids a manual click racing with the loop's own next step.
+    const blocked = isRunning || automationActive;
+    document.querySelectorAll('.job-btn').forEach((btn) => { btn.disabled = blocked; });
+    if (!blocked) {
+      autosendBtn.disabled = !autosendConfirm.checked;
+      reiAutosendBtn.disabled = !reiAutosendConfirm.checked;
+    }
     inputBox.disabled = !isRunning;
     sendInputBtn.disabled = !isRunning;
     stopBtn.disabled = !isRunning;
@@ -86,6 +112,9 @@
 
   autosendConfirm.addEventListener('change', () => {
     autosendBtn.disabled = !autosendConfirm.checked;
+  });
+  reiAutosendConfirm.addEventListener('change', () => {
+    reiAutosendBtn.disabled = !reiAutosendConfirm.checked;
   });
 
   document.querySelectorAll('.job-btn').forEach((btn) => {
@@ -125,11 +154,110 @@
     el.querySelector('.flag-value').textContent = value ? 'ON' : 'off';
   }
 
+  function updateGoogleVoiceVisibility(enabled) {
+    document.getElementById('google-voice-section').style.display = enabled ? '' : 'none';
+    document.getElementById('google-voice-hidden-note').style.display = enabled ? 'none' : '';
+  }
+
+  function refreshHeaderFlags() {
+    api.getStatus().then((status) => {
+      renderFlag('flag-voice', status.flags.ENABLE_VOICE_AUTOMATION);
+      renderFlag('flag-autosend', status.flags.ENABLE_AUTO_SMS_SEND);
+      updateGoogleVoiceVisibility(status.flags.ENABLE_VOICE_AUTOMATION);
+    });
+  }
+
+  // --- Continuous Automation Loop ---
+  const automationStatusEl = document.getElementById('automation-loop-status');
+  const automationStartBtn = document.getElementById('automation-start-btn');
+  const automationPauseResumeBtn = document.getElementById('automation-pause-resume-btn');
+  const automationStopBtn = document.getElementById('automation-stop-btn');
+  const cycleIntervalInput = document.getElementById('cycle-interval-input');
+
+  function renderAutomationStatus(automation) {
+    automationActive = automation.state !== 'stopped';
+    if (automation.state === 'stopped') {
+      automationStatusEl.textContent = 'Stopped';
+      automationStartBtn.disabled = false;
+      automationPauseResumeBtn.disabled = true;
+      automationPauseResumeBtn.textContent = 'Pause';
+      automationStopBtn.disabled = true;
+    } else if (automation.state === 'running') {
+      automationStatusEl.textContent = 'Running -- cycle ' + automation.cycleCount +
+        (automation.currentStep ? ', current step: ' + automation.currentStep : '');
+      automationStartBtn.disabled = true;
+      automationPauseResumeBtn.disabled = false;
+      automationPauseResumeBtn.textContent = 'Pause';
+      automationStopBtn.disabled = false;
+    } else if (automation.state === 'paused') {
+      automationStatusEl.textContent = 'Paused' + (automation.currentStep ? ' after: ' + automation.currentStep : '');
+      automationStartBtn.disabled = true;
+      automationPauseResumeBtn.disabled = false;
+      automationPauseResumeBtn.textContent = 'Resume';
+      automationStopBtn.disabled = false;
+    } else if (automation.state === 'stopping') {
+      automationStatusEl.textContent = 'Stopping -- finishing: ' + (automation.currentStep || '(current step)');
+      automationStartBtn.disabled = true;
+      automationPauseResumeBtn.disabled = true;
+      automationStopBtn.disabled = true;
+    }
+    // Re-derive one-shot job button disabled state now that automationActive may have changed.
+    setRunningState(lastKnownRunning);
+  }
+
+  automationStartBtn.addEventListener('click', async () => {
+    const result = await api.startAutomation();
+    if (result.ok === false) appendLog('system', 'Could not start automation loop: ' + result.error);
+  });
+  automationPauseResumeBtn.addEventListener('click', async () => {
+    const result = automationPauseResumeBtn.textContent === 'Pause' ? await api.pauseAutomation() : await api.resumeAutomation();
+    if (result.ok === false) appendLog('system', 'Automation loop action failed: ' + result.error);
+  });
+  automationStopBtn.addEventListener('click', async () => {
+    const result = await api.stopAutomation();
+    if (result.ok === false) appendLog('system', 'Could not stop automation loop: ' + result.error);
+  });
+  cycleIntervalInput.addEventListener('change', async () => {
+    const minutes = Number(cycleIntervalInput.value) || 15;
+    const result = await api.setCycleInterval(minutes);
+    if (result.ok === false) appendLog('system', 'Could not update cycle interval: ' + result.error);
+    else appendLog('system', 'Automation cycle interval set to ' + (result.minutes || minutes) + ' minute(s).');
+  });
+  api.onAutomationStatus((payload) => renderAutomationStatus(payload));
+
   api.getStatus().then((status) => {
     renderFlag('flag-voice', status.flags.ENABLE_VOICE_AUTOMATION);
     renderFlag('flag-autosend', status.flags.ENABLE_AUTO_SMS_SEND);
+    updateGoogleVoiceVisibility(status.flags.ENABLE_VOICE_AUTOMATION);
+    renderAutomationStatus(status.automation);
+    cycleIntervalInput.value = status.automation.cycleIntervalMinutes;
     setRunningState(!!status.running);
     if (status.running) appendLog('system', '(a job was already running when this window opened: ' + status.running + ')');
+  });
+
+  // --- Settings: live-sending toggles, written straight to .env ---
+  document.querySelectorAll('#settings-toggle-list .toggle-row').forEach((row) => {
+    const key = row.dataset.key;
+    const checkbox = row.querySelector('input[type="checkbox"]');
+    checkbox.addEventListener('change', async () => {
+      checkbox.disabled = true;
+      const result = await api.setSetting(key, checkbox.checked);
+      checkbox.disabled = false;
+      if (result.ok === false) {
+        appendLog('system', 'Failed to update ' + key + ': ' + result.error);
+        checkbox.checked = !checkbox.checked;
+        return;
+      }
+      appendLog('system', key + ' set to ' + (checkbox.checked ? 'true' : 'false') + '.');
+      refreshHeaderFlags();
+    });
+  });
+
+  api.getSettings().then((settings) => {
+    document.querySelectorAll('#settings-toggle-list .toggle-row').forEach((row) => {
+      const checkbox = row.querySelector('input[type="checkbox"]');
+      checkbox.checked = !!settings[row.dataset.key];
+    });
   });
 
   // --- Outreach Queue: add-row form, workflow buttons, rows table ---

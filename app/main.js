@@ -6,10 +6,13 @@
 const path = require('path');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
-const { JobRunner, readEnvFlags } = require('./jobRunner');
+const { JobRunner } = require('./jobRunner');
+const { AutomationLoop } = require('./automationLoop');
 const outreachActions = require('../src/outreach/actions');
+const envSettings = require('./envSettings');
 
 const runner = new JobRunner();
+const automationLoop = new AutomationLoop(runner);
 let mainWindow;
 
 function createWindow() {
@@ -36,13 +39,56 @@ function sendToRenderer(channel, payload) {
 runner.on('job-started', (p) => sendToRenderer('job-started', p));
 runner.on('job-finished', (p) => sendToRenderer('job-finished', p));
 runner.on('log', (p) => sendToRenderer('log', p));
+automationLoop.on('log', (p) => sendToRenderer('log', p));
+automationLoop.on('status-changed', (p) => sendToRenderer('automation-status', p));
 
 ipcMain.handle('get-status', () => ({
   running: runner.isRunning(),
   jobs: runner.listJobs(),
-  flags: readEnvFlags(),
-  sheetId: process.env.GOOGLE_SHEET_ID || ''
+  flags: envSettings.getToggleSettings(),
+  sheetId: process.env.GOOGLE_SHEET_ID || '',
+  automation: automationLoop.getStatus()
 }));
+
+ipcMain.handle('settings:get', () => envSettings.getToggleSettings());
+
+ipcMain.handle('settings:set', (_event, { key, value }) => {
+  try {
+    return { ok: true, settings: envSettings.setToggleSetting(key, value) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('settings:get-cycle-interval', () => envSettings.getCycleIntervalMinutes());
+
+ipcMain.handle('settings:set-cycle-interval', (_event, minutes) => {
+  try {
+    return { ok: true, minutes: envSettings.setCycleIntervalMinutes(minutes) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('automation:start', () => {
+  automationLoop.start();
+  return { ok: true, status: automationLoop.getStatus() };
+});
+
+ipcMain.handle('automation:pause', () => {
+  automationLoop.pause();
+  return { ok: true, status: automationLoop.getStatus() };
+});
+
+ipcMain.handle('automation:resume', () => {
+  automationLoop.resume();
+  return { ok: true, status: automationLoop.getStatus() };
+});
+
+ipcMain.handle('automation:stop', () => {
+  automationLoop.stop();
+  return { ok: true, status: automationLoop.getStatus() };
+});
 
 ipcMain.handle('run-job', (_event, name) => {
   try {
@@ -107,6 +153,14 @@ ipcMain.handle('outreach:add-from-flip-scout', async (_event, { sheetRows, campa
   }
 });
 
+ipcMain.handle('outreach:lookup-redfin-agent-contact', async (_event, address) => {
+  try {
+    return { ok: true, contact: await outreachActions.lookupRedfinAgentContact(address) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('outreach:refresh-validation', async () => {
   try {
     return { ok: true, results: await outreachActions.refreshValidation() };
@@ -165,4 +219,7 @@ ipcMain.handle('outreach:get-row', async (_event, id) => {
 });
 
 app.whenReady().then(createWindow);
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => {
+  automationLoop.stop();
+  app.quit();
+});

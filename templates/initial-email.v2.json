@@ -1,0 +1,20 @@
+{
+  "id": "initial-email",
+  "channel": "email",
+  "version": 2,
+  "sequencePosition": 1,
+  "subject": "Interest in {{propertyAddress}}, {{city}} -- Cash Buyer Inquiry",
+  "body": "Hi {{agentFirstName}},\n\nI'm with {{companyWebsite}} -- we're a home buying company here in the Bay Area.\n\nI'm looking at your listing at {{propertyAddress}} in {{city}} and had a couple of quick questions:\n\n- When are you taking offers, and is there a specific offer deadline?\n- Do you have any disclosures or inspection reports available?\n- Are you already representing a buyer on this one, or would you be open to representing us in the transaction?\n\nWe've been active in the Bay Area for {{yearsInBusiness}} and have a track record you can see here: {{googleReviewLink}}.\n\nEven if this particular property doesn't work out, we'd love to stay in touch -- we regularly buy properties that need work, on-market or off-market, and we're glad to cover your commission on this transaction. More importantly, we're looking to build a real relationship with you for whatever comes next.\n\nIf you'd like to hop on a quick call, I can connect you with {{handoffPerson}} to talk through the property and share a bit more about who we are and the kinds of properties we buy.\n\nThanks for your time,\n{{senderName}}\n{{senderPhone}}\n{{senderEmail}}\n{{companyWebsite}}",
+  "requiredFields": [
+    "agentFirstName",
+    "senderName",
+    "companyWebsite",
+    "propertyAddress",
+    "city",
+    "yearsInBusiness",
+    "googleReviewLink",
+    "handoffPerson",
+    "senderPhone",
+    "senderEmail"
+  ]
+}
