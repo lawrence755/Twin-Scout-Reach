@@ -35,6 +35,7 @@
       submitForApproval: () => fetch('/outreach/submit-for-approval', { method: 'POST' }).then((r) => r.json()),
       approveOutreach: () => fetch('/outreach/approve', { method: 'POST' }).then((r) => r.json()),
       sendApprovedEmails: () => fetch('/outreach/send-emails', { method: 'POST' }).then((r) => r.json()),
+      checkReplies: () => fetch('/outreach/check-replies', { method: 'POST' }).then((r) => r.json()),
       listOutreachRows: () => fetch('/outreach/rows').then((r) => r.json()),
       getOutreachRow: (id) => fetch('/outreach/row/' + encodeURIComponent(id)).then((r) => r.json()),
       updateOutreachRow: (id, fields) =>
@@ -47,6 +48,18 @@
       onJobFinished: (cb) => listeners['job-finished'].push(cb)
     };
   }
+
+  // --- Tabs ---
+  function activateTab(name) {
+    document.querySelectorAll('.tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === name));
+    document.querySelectorAll('.tab-pane').forEach((pane) => pane.classList.toggle('active', pane.id === 'tab-' + name));
+  }
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+  });
+  document.querySelectorAll('[data-goto-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => activateTab(btn.dataset.gotoTab));
+  });
 
   const logEl = document.getElementById('log');
   const inputBox = document.getElementById('input-box');
@@ -128,20 +141,69 @@
     return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  const STATUS_CLASS = {
+    'Information Needed': 'status-neutral',
+    'Ready for Drafting': 'status-info',
+    'Pending Approval': 'status-info',
+    'Needs Review': 'status-warn',
+    'Approved': 'status-info',
+    'Contacted': 'status-warn',
+    'Follow-Up Due': 'status-warn',
+    'Replied': 'status-info',
+    'Handed Off': 'status-good',
+    'Opted Out': 'status-bad',
+    'Rejected': 'status-bad',
+    'Not Interested': 'status-bad',
+    'Do Not Automate': 'status-bad',
+    'Duplicate': 'status-neutral',
+    'Failed Contact': 'status-bad'
+  };
+  function statusBadge(status) {
+    if (!status) return '';
+    return `<span class="status-badge ${STATUS_CLASS[status] || 'status-neutral'}">${escapeHtml(status)}</span>`;
+  }
+
+  const NEEDS_ACTION_STATUSES = ['Information Needed', 'Ready for Drafting', 'Pending Approval', 'Needs Review'];
+  const IN_PROGRESS_STATUSES = ['Approved', 'Contacted', 'Follow-Up Due', 'Replied'];
+  const CLOSED_OUT_STATUSES = ['Opted Out', 'Rejected', 'Not Interested', 'Do Not Automate', 'Duplicate', 'Failed Contact'];
+
+  function renderDashboard(rows) {
+    const counts = { total: rows.length, needsAction: 0, inProgress: 0, handedOff: 0, closedOut: 0 };
+    const byStatus = {};
+    rows.forEach((r) => {
+      byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+      if (NEEDS_ACTION_STATUSES.includes(r.status)) counts.needsAction++;
+      else if (IN_PROGRESS_STATUSES.includes(r.status)) counts.inProgress++;
+      else if (r.status === 'Handed Off') counts.handedOff++;
+      else if (CLOSED_OUT_STATUSES.includes(r.status)) counts.closedOut++;
+    });
+    Object.keys(counts).forEach((key) => {
+      const card = document.querySelector(`.stat-card[data-stat="${key}"] .stat-value`);
+      if (card) card.textContent = counts[key];
+    });
+    const breakdown = document.getElementById('status-breakdown');
+    breakdown.innerHTML = Object.entries(byStatus)
+      .sort((a, b) => b[1] - a[1])
+      .map(([status, count]) => `<span class="status-chip">${statusBadge(status)}<span class="count">${count}</span></span>`)
+      .join('') || '<span class="muted-tag">No rows yet.</span>';
+  }
+  document.getElementById('refresh-dashboard-btn').addEventListener('click', refreshOutreachTable);
+
   async function refreshOutreachTable() {
     const result = await api.listOutreachRows();
     if (result.ok === false) {
       appendLog('system', 'Could not load Outreach Queue rows: ' + result.error);
       return;
     }
+    const rows = result.rows || [];
+    renderDashboard(rows);
     const tbody = document.querySelector('#outreach-table tbody');
     tbody.innerHTML = '';
-    (result.rows || []).forEach((r, i) => {
+    rows.forEach((r, i) => {
       const tr = document.createElement('tr');
       tr.dataset.id = r.id;
-      tr.style.cursor = 'pointer';
       tr.title = 'Click to edit this row';
-      tr.innerHTML = `<td>${i + 1}</td><td>${escapeHtml(r.address)}</td><td>${escapeHtml(r.status)}</td><td>${escapeHtml(r.agentPhone)}</td><td>${escapeHtml(r.agentEmail)}</td>`;
+      tr.innerHTML = `<td>${i + 1}</td><td>${escapeHtml(r.address)}</td><td>${statusBadge(r.status)}</td><td>${escapeHtml(r.agentPhone)}</td><td>${escapeHtml(r.agentEmail)}</td>`;
       tr.addEventListener('click', () => loadRowIntoForm(r.id));
       tbody.appendChild(tr);
     });
@@ -220,6 +282,20 @@
     appendLog('system', 'Send approved emails (sending ' + (result.sendingEnabled ? 'ON' : 'OFF, dry run') + '): ' + result.results.length + ' row(s).');
     result.results.forEach((r) => {
       appendLog('system', '  ' + r.address + ' -> ' + r.result + (r.notes ? ' -- ' + r.notes : ''));
+    });
+    refreshOutreachTable();
+  });
+
+  document.getElementById('check-replies-btn').addEventListener('click', async () => {
+    const result = await api.checkReplies();
+    if (result.ok === false) {
+      appendLog('system', 'Check for replies failed: ' + result.error);
+      return;
+    }
+    appendLog('system', 'Check for replies: ' + result.results.length + ' row(s) checked.');
+    result.results.forEach((r) => {
+      appendLog('system', '  ' + r.address + ' -> ' + r.result + (r.replyText ? ' -- reply: "' + r.replyText + '"' : ''));
+      if (r.notifyError) appendLog('system', '    Google Chat notification failed: ' + r.notifyError);
     });
     refreshOutreachTable();
   });

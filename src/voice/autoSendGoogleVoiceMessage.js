@@ -23,6 +23,14 @@ const { buildOutreachKey, isSuppressed } = require('../../shared/keys');
 const { renderTemplate } = require('../../shared/templateEngine');
 const store = require('../outreach/store');
 const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
+const followupSmsTemplate = require('../../templates/followup-sms.v1.json');
+const finalSmsTemplate = require('../../templates/final-sms.v1.json');
+
+// Phase 9 sequence: initial -> followup -> final -> stop (Failed
+// Contact). followupCount tracks how many of the two follow-ups have
+// gone out for a given row (0 = none yet, 1 = followup sent, 2 = final
+// sent -- sequence exhausted after that).
+const MAX_FOLLOWUPS = 2;
 
 function getOutreachQueueRows(filterFn) {
   return store.getQueueRows(filterFn);
@@ -43,8 +51,32 @@ function isAutoSmsSendEnabled() {
   return String(process.env.ENABLE_AUTO_SMS_SEND || '').trim().toLowerCase() === 'true';
 }
 
+/**
+ * Picks the right template for a row's current point in the sequence.
+ * Returns null (with a reason) once both follow-ups have already gone
+ * out -- Phase 9's "limit the sequence to two follow-ups," after which
+ * outreach stops rather than texting indefinitely.
+ */
+function pickTemplateForRow(row) {
+  if (row.status === 'Approved') {
+    return { template: initialSmsTemplate, nextFollowupCount: 0 };
+  }
+  // row.status === 'Follow-Up Due' from here on.
+  const followupCount = Number(row.followupCount || 0);
+  if (followupCount >= MAX_FOLLOWUPS) return null; // sequence exhausted
+  return followupCount === 0
+    ? { template: followupSmsTemplate, nextFollowupCount: 1 }
+    : { template: finalSmsTemplate, nextFollowupCount: 2 };
+}
+
 async function buildEligibleMessages() {
-  const rows = await getOutreachQueueRows((row) => row.agentPhone && row.status !== 'Handed Off');
+  // Must match sendApprovedEmails()/getApprovedSmsRows()'s gate exactly
+  // for the initial send (status === 'Approved') -- a looser filter
+  // there (e.g. "anything not Handed Off") is a real, confirmed bug
+  // that let an unapproved row get a real text sent during testing.
+  // Follow-Up Due rows are the two allowed follow-up sends (see
+  // pickTemplateForRow); nothing else in the flow is widened.
+  const rows = await getOutreachQueueRows((row) => row.agentPhone && (row.status === 'Approved' || row.status === 'Follow-Up Due'));
   const suppressionList = await getSuppressionList();
   const allOutreachKeys = rows.map((row) => row.outreachKey);
   const mergeBase = {
@@ -81,15 +113,25 @@ async function buildEligibleMessages() {
       continue;
     }
 
+    const picked = pickTemplateForRow(row);
+    if (!picked) {
+      results.push({ row, blocked: true, reason: 'Follow-up sequence exhausted (final message already sent).' });
+      continue;
+    }
+
     const outreachKey = row.outreachKey || buildOutreachKey(row.agentPhone, row.propertyAddress, row.campaign || 'flip-scout');
     try {
-      const rendered = renderTemplate(initialSmsTemplate, {
+      const rendered = renderTemplate(picked.template, {
         ...mergeBase,
         agentFirstName: (row.agentName || '').trim().split(/\s+/)[0] || '',
         propertyAddress: row.propertyAddress,
         city: row.city
       });
-      results.push({ row, blocked: false, outreachKey, body: rendered.body });
+      results.push({
+        row, blocked: false, outreachKey, body: rendered.body,
+        templateId: picked.template.id + '.v' + picked.template.version,
+        nextFollowupCount: picked.nextFollowupCount
+      });
     } catch (err) {
       results.push({ row, blocked: true, reason: 'SMS: ' + err.message });
     }
@@ -105,13 +147,33 @@ function coerceBoolean(value) {
 }
 
 async function sendOne(page, item) {
-  await page.getByRole('button', { name: /send a new message|start a new conversation/i }).click();
-  const recipientInput = page.getByRole('combobox', { name: /type a name or phone number/i });
+  await page.getByRole('button', { name: /send (a )?new message|start a new conversation/i }).click();
+  await page.waitForTimeout(1500);
+  const recipientInput = page.getByPlaceholder(/type a name or phone number/i);
   await recipientInput.fill(item.row.agentPhone);
-  await page.getByText(item.row.agentPhone, { exact: false }).first().click();
+  await page.waitForTimeout(1500);
+  // Verified against the live UI via Playwright's recorder: the correct
+  // recipient-suggestion control is a proper ARIA button named
+  // "Send to <number>". CAUTION: Google Voice's persistent right-side
+  // call panel shows a sidebar list of frequently-contacted people as
+  // plain <li> elements with no ARIA role at all -- clicking one of
+  // THOSE calls them instead of adding a message recipient (this
+  // previously placed a real, live call to a real contact). Targeting
+  // getByRole('button', ...) is what makes this safe: the call panel's
+  // rows aren't buttons, so this can't match them. Do not change this to
+  // a bare text/li selector.
+  await page.getByRole('button', { name: /^send to/i }).click();
+  // Running the fill/click steps back-to-back with no pause caused a
+  // real, confirmed bug: a stale/leftover draft in the compose box got
+  // sent instead of the freshly-filled text, even though the in-script
+  // verification check (below) read back the correct value. Adding a
+  // pause here before interacting with the compose box is what fixed it
+  // -- verified against the live UI by deliberately re-running slowly.
+  await page.waitForTimeout(1500);
 
   const composeBox = page.getByRole('textbox', { name: /type a message/i });
   await composeBox.fill(item.body);
+  await page.waitForTimeout(1500);
 
   const enteredText = (await composeBox.inputValue().catch(() => null)) ?? (await composeBox.innerText());
   if (enteredText.trim() !== item.body.trim()) {
@@ -121,6 +183,14 @@ async function sendOne(page, item) {
   // The one line in this file that actually sends. No operator
   // confirmation gates this -- see the file header.
   await page.getByRole('button', { name: /send message/i }).click();
+  // Confirmed real bug: clicking Send only triggers the actual network
+  // request async -- with no wait here, main()'s context.close() (right
+  // after this returns, for the last/only item) could kill the browser
+  // before that request completes, so Playwright sees a successful click
+  // but the text never actually goes out. Verified against the live UI:
+  // manual runs with a pause after the click delivered every time; this
+  // function with no pause silently failed to deliver more than once.
+  await page.waitForTimeout(3000);
 
   return { result: 'Sent', notes: '' };
 }
@@ -139,10 +209,10 @@ async function main() {
   const ready = items.filter((i) => !i.blocked);
 
   for (const item of items.filter((i) => i.blocked)) {
-    await updateOutreachQueueRow(item.row.id, {
-      status: item.reason.toLowerCase().includes('duplicate') ? 'Duplicate' : 'Needs Review',
-      qualificationReasons: item.reason
-    });
+    let status = 'Needs Review';
+    if (item.reason.toLowerCase().includes('duplicate')) status = 'Duplicate';
+    else if (item.reason.toLowerCase().includes('sequence exhausted')) status = 'Failed Contact';
+    await updateOutreachQueueRow(item.row.id, { status, qualificationReasons: item.reason });
   }
 
   if (ready.length === 0) {
@@ -158,6 +228,8 @@ async function main() {
     const outcome = await sendOne(page, item);
     await updateOutreachQueueRow(item.row.id, {
       status: outcome.result === 'Sent' ? 'Contacted' : 'Needs Review',
+      contactedAt: outcome.result === 'Sent' ? new Date().toISOString() : undefined,
+      followupCount: outcome.result === 'Sent' ? item.nextFollowupCount : undefined,
       qualificationReasons: outcome.notes
     });
     await appendAutoOutreachLog({
@@ -169,12 +241,12 @@ async function main() {
       agentEmail: item.row.agentEmail,
       redfinLink: item.row.redfinLink,
       channel: 'SMS',
-      templateId: 'initial-sms.v' + initialSmsTemplate.version,
+      templateId: item.templateId,
       messageBody: item.body,
       result: outcome.result,
       notes: outcome.notes
     });
-    console.log(item.row.agentPhone + ': ' + outcome.result);
+    console.log(item.row.agentPhone + ' (' + item.templateId + '): ' + outcome.result);
   }
 
   await context.close();

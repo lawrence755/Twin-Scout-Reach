@@ -58,6 +58,9 @@ const config = {
   gmail: {
     oauthClientPath: resolvePath(process.env.GMAIL_OAUTH_CLIENT_PATH, 'gmail-oauth-client.json'),
     tokenPath: resolvePath(process.env.GMAIL_TOKEN_PATH, 'gmail-token.json')
+  },
+  notifications: {
+    googleChatWebhookUrl: process.env.GOOGLE_CHAT_WEBHOOK_URL || ''
   }
 };
 

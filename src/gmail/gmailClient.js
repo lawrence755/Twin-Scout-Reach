@@ -15,7 +15,10 @@ const http = require('http');
 const { google } = require('googleapis');
 const config = require('../config');
 
-const SCOPES = ['https://www.googleapis.com/auth/gmail.send'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.readonly'
+];
 
 function loadClientSecrets() {
   const raw = JSON.parse(fs.readFileSync(config.gmail.oauthClientPath, 'utf8'));
@@ -131,4 +134,80 @@ async function sendEmail({ to, subject, body }) {
   });
 }
 
-module.exports = { sendEmail, runInteractiveAuthorization };
+function decodeBase64Url(data) {
+  return Buffer.from(data, 'base64').toString('utf8');
+}
+
+function extractPlainTextBody(payload) {
+  if (!payload) return '';
+  if (payload.mimeType === 'text/plain' && payload.body && payload.body.data) {
+    return decodeBase64Url(payload.body.data);
+  }
+  for (const part of payload.parts || []) {
+    const text = extractPlainTextBody(part);
+    if (text) return text;
+  }
+  if (payload.body && payload.body.data) return decodeBase64Url(payload.body.data);
+  return '';
+}
+
+function getHeader(headers, name) {
+  const h = (headers || []).find((x) => x.name.toLowerCase() === name.toLowerCase());
+  return h ? h.value : '';
+}
+
+/**
+ * Google Voice's own "email me when I get a text" notifications come
+ * from an address shaped like
+ * "<your-voice-number>.<their-number>.<token>@txt.voice.google.com" --
+ * the other party's number is embedded directly in the sender address,
+ * which is far more reliable for matching than parsing a display name
+ * out of the subject line. The real "From" header includes a display
+ * name too (e.g. "John Decena (SMS) <15....@txt.voice.google.com>"),
+ * so the address must be pulled out of the angle brackets (or used
+ * bare, for the no-display-name case) before this pattern is applied.
+ */
+const VOICE_NOTIFICATION_SENDER_PATTERN = /^\d+\.(\d+)\.[^.]+@txt\.voice\.google\.com$/i;
+
+function extractEmailAddress(fromHeader) {
+  const angleMatch = String(fromHeader || '').match(/<([^>]+)>/);
+  return (angleMatch ? angleMatch[1] : fromHeader).trim();
+}
+
+/**
+ * Searches for Google Voice "new text message" notification emails
+ * newer than `after` (a Date), and returns each one's sender-embedded
+ * phone number alongside the message body (the actual reply content)
+ * and timestamp. Does not filter by recipient/outreach row -- that's
+ * the caller's job, since this inbox receives Voice notifications for
+ * every number on the account, not just outreach ones.
+ */
+async function searchVoiceReplyEmails(after) {
+  const client = await getAuthorizedClient();
+  const gmail = google.gmail({ version: 'v1', auth: client });
+  const afterClause = after ? ' after:' + Math.floor(after.getTime() / 1000) : '';
+  const { data } = await gmail.users.messages.list({
+    userId: 'me',
+    q: 'from:(txt.voice.google.com)' + afterClause,
+    maxResults: 100
+  });
+
+  const results = [];
+  for (const ref of data.messages || []) {
+    const { data: msg } = await gmail.users.messages.get({ userId: 'me', id: ref.id, format: 'full' });
+    const from = extractEmailAddress(getHeader(msg.payload.headers, 'From'));
+    const subject = getHeader(msg.payload.headers, 'Subject');
+    const match = from.match(VOICE_NOTIFICATION_SENDER_PATTERN);
+    if (!match) continue; // not a Voice text notification (could be a different Voice email type)
+    results.push({
+      messageId: ref.id,
+      fromPhoneDigits: match[1],
+      subject,
+      body: extractPlainTextBody(msg.payload).trim(),
+      date: new Date(Number(msg.internalDate))
+    });
+  }
+  return results;
+}
+
+module.exports = { sendEmail, runInteractiveAuthorization, searchVoiceReplyEmails };

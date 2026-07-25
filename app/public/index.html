@@ -6,101 +6,193 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header>
-    <h1>Outreach Control Panel</h1>
-    <button id="open-sheet-btn" class="link-btn">Open Spreadsheet ↗</button>
-  </header>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <h1>Outreach Control Panel</h1>
+        <span class="brand-sub">Twin Home Buyer</span>
+      </div>
+      <div class="header-right">
+        <div class="flags-inline" id="flags-panel">
+          <div class="flag" id="flag-voice">
+            <span class="dot"></span>
+            <span class="flag-label">Voice Automation</span>
+            <span class="flag-value">loading…</span>
+          </div>
+          <div class="flag" id="flag-autosend">
+            <span class="dot"></span>
+            <span class="flag-label">Auto-send SMS</span>
+            <span class="flag-value">loading…</span>
+          </div>
+        </div>
+        <button id="open-sheet-btn" class="btn btn-ghost">Open Spreadsheet ↗</button>
+      </div>
+    </header>
 
-  <section id="flags-panel" class="panel">
-    <div class="flag" id="flag-voice">
-      <span class="dot"></span>
-      <span class="flag-label">ENABLE_VOICE_AUTOMATION</span>
-      <span class="flag-value">loading…</span>
-    </div>
-    <div class="flag" id="flag-autosend">
-      <span class="dot"></span>
-      <span class="flag-label">ENABLE_AUTO_SMS_SEND</span>
-      <span class="flag-value">loading…</span>
-    </div>
-  </section>
+    <nav class="tabs" role="tablist">
+      <button class="tab-btn active" data-tab="dashboard" role="tab">Dashboard</button>
+      <button class="tab-btn" data-tab="flip-scout" role="tab">Flip Scout Leads</button>
+      <button class="tab-btn" data-tab="outreach" role="tab">Outreach Queue</button>
+      <button class="tab-btn" data-tab="automation" role="tab">Automation</button>
+    </nav>
 
-  <section class="panel flip-scout-panel">
-    <h2>Flip Scout Leads <small>(Bryan's, read-only)</small></h2>
-    <div class="outreach-actions">
-      <button id="load-flip-scout-btn">Load / refresh leads</button>
-      <input id="flip-scout-campaign" placeholder="Campaign" value="flip-scout" />
-      <button id="add-selected-flip-scout-btn">Add selected to Outreach Queue</button>
-    </div>
-    <div class="outreach-actions">
-      <label><input type="checkbox" id="good-flip-only-filter" checked /> Show only Good Flip leads</label>
-      <button id="select-all-good-flip-btn">Select all Good Flip</button>
-    </div>
-    <div class="outreach-table-wrap">
-      <table id="flip-scout-table">
-        <thead><tr><th></th><th>Score</th><th>Rec.</th><th>Flip Quality</th><th>Address</th><th>City</th><th>ARV</th><th>Profit (Light)</th><th>Redfin Link</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
+    <main class="tab-content">
+      <!-- ---------------- Dashboard ---------------- -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <div class="stat-grid" id="stat-grid">
+          <div class="stat-card" data-stat="total">
+            <span class="stat-value">–</span>
+            <span class="stat-label">Total in Queue</span>
+          </div>
+          <div class="stat-card" data-stat="needsAction">
+            <span class="stat-value">–</span>
+            <span class="stat-label">Needs Action</span>
+          </div>
+          <div class="stat-card" data-stat="inProgress">
+            <span class="stat-value">–</span>
+            <span class="stat-label">In Progress</span>
+          </div>
+          <div class="stat-card stat-good" data-stat="handedOff">
+            <span class="stat-value">–</span>
+            <span class="stat-label">Handed Off</span>
+          </div>
+          <div class="stat-card stat-muted" data-stat="closedOut">
+            <span class="stat-value">–</span>
+            <span class="stat-label">Opted Out / Rejected</span>
+          </div>
+        </div>
 
-  <section class="panel outreach-panel">
-    <h2>Outreach Queue</h2>
-    <form id="add-row-form" class="add-row-form">
-      <input type="hidden" name="editingId" value="" />
-      <input name="propertyAddress" placeholder="Property Address" required />
-      <input name="city" placeholder="City" required />
-      <input name="agentName" placeholder="Agent Name" required />
-      <input name="agentPhone" placeholder="Agent Phone" required />
-      <input name="agentEmail" placeholder="Agent Email (optional)" />
-      <input name="listingStatus" placeholder="Listing Status" value="Active" />
-      <input name="daysOnMarket" placeholder="Days On Market" type="number" value="10" />
-      <input name="campaign" placeholder="Campaign" value="internal-test" />
-      <label><input type="checkbox" name="tenantOccupied" /> Tenant Occupied</label>
-      <label><input type="checkbox" name="needsWork" checked /> Needs Work</label>
-      <label><input type="checkbox" name="appearsRenovated" /> Appears Renovated</label>
-      <label><input type="checkbox" name="compReviewCompleted" checked /> Comp Review Completed</label>
-      <button type="submit" id="add-row-btn">Add Row</button>
-      <button type="button" id="cancel-edit-btn" style="display:none;">Cancel edit / New row</button>
-    </form>
-    <div class="outreach-actions">
-      <button id="refresh-validation-btn">Refresh validation</button>
-      <button id="submit-approval-btn">Submit for approval</button>
-      <button id="approve-btn">Approve outreach</button>
-      <button id="send-emails-btn" class="danger-inline">Send approved emails</button>
-      <span class="note">Gated by ENABLE_EMAIL_SENDING in .env. Click a row below to edit it (e.g. fill in agent info after adding from Flip Scout).</span>
-    </div>
-    <div class="outreach-table-wrap">
-      <table id="outreach-table">
-        <thead><tr><th>#</th><th>Address</th><th>Status</th><th>Agent Phone</th><th>Agent Email</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Status Breakdown</h2>
+            <button id="refresh-dashboard-btn" class="btn btn-ghost btn-sm">Refresh</button>
+          </div>
+          <div id="status-breakdown" class="status-breakdown"></div>
+        </div>
 
-  <section class="panel actions">
-    <button data-job="redfin-enrich" class="job-btn">Enrich agent contacts (Redfin)</button>
-    <button data-job="voice-prepare" class="job-btn">Prepare Google Voice texts<br><small>stops before Send</small></button>
+        <div class="panel">
+          <h2>Quick Actions</h2>
+          <div class="quick-actions">
+            <button class="btn btn-secondary" data-goto-tab="flip-scout">Browse Flip Scout Leads</button>
+            <button class="btn btn-secondary" data-goto-tab="outreach">Review Outreach Queue</button>
+            <button class="btn btn-secondary" data-goto-tab="automation">Run Automation Jobs</button>
+          </div>
+        </div>
+      </section>
 
-    <div class="danger-box">
-      <label>
-        <input type="checkbox" id="autosend-confirm" />
-        I understand this sends real texts immediately, with no review.
-      </label>
-      <button data-job="voice-autosend" class="job-btn danger" id="autosend-btn" disabled>
-        Auto-send Google Voice texts<br><small>clicks Send -- no confirmation</small>
-      </button>
-    </div>
+      <!-- ---------------- Flip Scout Leads ---------------- -->
+      <section id="tab-flip-scout" class="tab-pane">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Flip Scout Leads <span class="muted-tag">Bryan's, read-only</span></h2>
+          </div>
+          <div class="toolbar">
+            <button id="load-flip-scout-btn" class="btn btn-primary">Load / refresh leads</button>
+            <input id="flip-scout-campaign" class="input" placeholder="Campaign" value="flip-scout" />
+            <button id="add-selected-flip-scout-btn" class="btn btn-secondary">Add selected to Outreach Queue</button>
+          </div>
+          <div class="toolbar">
+            <label class="checkbox-label"><input type="checkbox" id="good-flip-only-filter" checked /> Show only Good Flip leads</label>
+            <button id="select-all-good-flip-btn" class="btn btn-ghost btn-sm">Select all Good Flip</button>
+          </div>
+          <div class="table-wrap">
+            <table id="flip-scout-table" class="data-table">
+              <thead><tr><th></th><th>Score</th><th>Rec.</th><th>Flip Quality</th><th>Address</th><th>City</th><th>ARV</th><th>Profit (Light)</th><th>Redfin Link</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
-    <button id="stop-btn" class="stop-btn" disabled>Stop current job</button>
-  </section>
+      <!-- ---------------- Outreach Queue ---------------- -->
+      <section id="tab-outreach" class="tab-pane">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Add / Edit Row</h2>
+            <span class="muted-tag" id="add-row-hint">Click a queue row below to edit it</span>
+          </div>
+          <form id="add-row-form" class="add-row-form">
+            <input type="hidden" name="editingId" value="" />
+            <input class="input" name="propertyAddress" placeholder="Property Address" required />
+            <input class="input" name="city" placeholder="City" required />
+            <input class="input" name="agentName" placeholder="Agent Name" required />
+            <input class="input" name="agentPhone" placeholder="Agent Phone" required />
+            <input class="input" name="agentEmail" placeholder="Agent Email (optional)" />
+            <input class="input" name="listingStatus" placeholder="Listing Status" value="Active" />
+            <input class="input" name="daysOnMarket" placeholder="Days On Market" type="number" value="10" />
+            <input class="input" name="campaign" placeholder="Campaign" value="internal-test" />
+            <label class="checkbox-label"><input type="checkbox" name="tenantOccupied" /> Tenant Occupied</label>
+            <label class="checkbox-label"><input type="checkbox" name="needsWork" checked /> Needs Work</label>
+            <label class="checkbox-label"><input type="checkbox" name="appearsRenovated" /> Appears Renovated</label>
+            <label class="checkbox-label"><input type="checkbox" name="compReviewCompleted" checked /> Comp Review Completed</label>
+            <div class="form-buttons">
+              <button type="submit" id="add-row-btn" class="btn btn-primary">Add Row</button>
+              <button type="button" id="cancel-edit-btn" class="btn btn-ghost" style="display:none;">Cancel edit / New row</button>
+            </div>
+          </form>
+        </div>
 
-  <section class="panel log-panel">
-    <div id="log"></div>
-    <div class="input-row">
-      <input id="input-box" type="text" placeholder="Type a reply (e.g. sent / skip / reject) and press Enter" disabled />
-      <button id="send-input-btn" disabled>Send</button>
-    </div>
-  </section>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Outreach Queue</h2>
+          </div>
+          <div class="toolbar">
+            <button id="refresh-validation-btn" class="btn btn-secondary">Refresh validation</button>
+            <button id="submit-approval-btn" class="btn btn-secondary">Submit for approval</button>
+            <button id="approve-btn" class="btn btn-secondary">Approve outreach</button>
+            <button id="send-emails-btn" class="btn btn-danger-outline">Send approved emails</button>
+            <button id="check-replies-btn" class="btn btn-secondary">Check for replies</button>
+          </div>
+          <p class="note">Gated by <code>ENABLE_EMAIL_SENDING</code> in <code>.env</code>.</p>
+          <div class="table-wrap">
+            <table id="outreach-table" class="data-table">
+              <thead><tr><th>#</th><th>Address</th><th>Status</th><th>Agent Phone</th><th>Agent Email</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- Automation ---------------- -->
+      <section id="tab-automation" class="tab-pane">
+        <div class="panel">
+          <h2>Automation Jobs</h2>
+          <div class="job-grid">
+            <button data-job="redfin-enrich" class="btn btn-secondary job-btn">
+              Enrich agent contacts (Redfin)
+            </button>
+            <button data-job="voice-prepare" class="btn btn-secondary job-btn">
+              Prepare Google Voice texts
+              <small>stops before Send</small>
+            </button>
+
+            <div class="danger-box">
+              <label class="checkbox-label">
+                <input type="checkbox" id="autosend-confirm" />
+                I understand this sends real texts immediately, with no review.
+              </label>
+              <button data-job="voice-autosend" class="btn btn-danger job-btn" id="autosend-btn" disabled>
+                Auto-send Google Voice texts
+                <small>clicks Send -- no confirmation</small>
+              </button>
+            </div>
+          </div>
+          <div class="job-footer">
+            <button id="stop-btn" class="btn btn-danger-outline" disabled>Stop current job</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="log-drawer panel">
+      <div class="log-header">Activity Log</div>
+      <div id="log"></div>
+      <div class="input-row">
+        <input id="input-box" class="input" type="text" placeholder="Type a reply (e.g. sent / skip / reject) and press Enter" disabled />
+        <button id="send-input-btn" class="btn btn-secondary" disabled>Send</button>
+      </div>
+    </footer>
+  </div>
 
   <script src="renderer.js"></script>
 </body>

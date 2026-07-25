@@ -11,6 +11,7 @@
     "redfin:enrich": "node src/redfin/enrichAgentContacts.js",
     "gmail:authorize": "node scripts/authorize-gmail.js",
     "test-row:add": "node scripts/add-test-row.js",
+    "check-replies": "node scripts/check-replies.js",
     "app": "electron .",
     "app:web": "node app/server.js",
     "dist:win": "electron-builder --win --dir"

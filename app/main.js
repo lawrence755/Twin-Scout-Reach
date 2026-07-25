@@ -14,8 +14,10 @@ let mainWindow;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 960,
-    height: 720,
+    width: 1280,
+    height: 840,
+    minWidth: 980,
+    minHeight: 640,
     title: 'Twin Home Buyer Outreach Control Panel',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -133,6 +135,14 @@ ipcMain.handle('outreach:send-emails', async () => {
   try {
     const { sendingEnabled, results } = await outreachActions.sendApprovedEmails();
     return { ok: true, sendingEnabled, results };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('outreach:check-replies', async () => {
+  try {
+    return { ok: true, results: await outreachActions.checkReplies() };
   } catch (err) {
     return { ok: false, error: err.message };
   }

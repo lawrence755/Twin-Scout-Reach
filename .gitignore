@@ -7,6 +7,11 @@ service-account.json
 .clasprc.json
 gmail-oauth-client.json
 gmail-token.json
+gmail-token-*.json
+.voice-profile/
+.voice-profile-*/
+.redfin-profile/
+dist/
 data/*.json
 playwright-report/
 test-results/

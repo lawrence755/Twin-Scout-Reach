@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "outreach-control-panel",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "app:web"],
+      "port": 4747
+    }
+  ]
+}

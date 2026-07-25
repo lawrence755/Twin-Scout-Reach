@@ -17,8 +17,9 @@ const { renderTemplate, extractMergeFields } = require('../../shared/templateEng
 const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
 const initialEmailTemplate = require('../../templates/initial-email.v1.json');
 const store = require('./store');
-const { getFlipScoutLeads, GOOD_FLIP_QUALITY } = require('../sheets/sheetsClient');
+const { getFlipScoutLeads, GOOD_FLIP_QUALITY, updateContactedColumn, writeOutreachStatusSnapshot } = require('../sheets/sheetsClient');
 const gmailClient = require('../gmail/gmailClient');
+const { postToGoogleChat } = require('../notifications/googleChat');
 
 const PRE_APPROVAL_STATUSES = ['Information Needed', 'Needs Review', 'Ready for Drafting'];
 
@@ -99,7 +100,7 @@ async function addFromFlipScout(sheetRows, campaign) {
 async function addRow(fields) {
   const campaign = fields.campaign || 'internal-test';
   const now = new Date().toISOString();
-  return store.appendQueueRow({
+  const row = store.appendQueueRow({
     status: 'Information Needed',
     dateAdded: now,
     lastUpdated: now,
@@ -108,6 +109,8 @@ async function addRow(fields) {
     outreachKey: buildOutreachKey(fields.agentPhone, fields.propertyAddress, campaign),
     contactKey: buildContactKey(fields.agentPhone)
   });
+  await syncOutreachStatusTab();
+  return row;
 }
 
 /**
@@ -118,7 +121,26 @@ async function updateRow(id, fields) {
   if (fields.agentPhone !== undefined) {
     fields.contactKey = buildContactKey(fields.agentPhone);
   }
-  return store.updateQueueRow(id, { ...fields, lastUpdated: new Date().toISOString() });
+  // outreachKey must be recomputed whenever anything it's built from
+  // changes -- not just at row-creation time. addFromFlipScout() adds
+  // a row with no agent phone yet (outreachKey ends up blank, since
+  // buildOutreachKey requires one), and the app's own UI explicitly
+  // expects agent info to be filled in later via this exact function
+  // ("fill in agent info after adding from Flip Scout" -- see the note
+  // above index.html's outreach table). Without this, every such row
+  // permanently keeps a blank outreachKey, and refreshValidation()'s
+  // duplicate check flags it as a false duplicate (multiple rows all
+  // sharing the same blank key).
+  if (fields.agentPhone !== undefined || fields.propertyAddress !== undefined || fields.campaign !== undefined) {
+    const existing = store.getQueueRows((r) => r.id === id)[0] || {};
+    const phone = fields.agentPhone !== undefined ? fields.agentPhone : existing.agentPhone;
+    const address = fields.propertyAddress !== undefined ? fields.propertyAddress : existing.propertyAddress;
+    const campaign = fields.campaign !== undefined ? fields.campaign : existing.campaign;
+    fields.outreachKey = buildOutreachKey(phone, address, campaign);
+  }
+  const row = store.updateQueueRow(id, { ...fields, lastUpdated: new Date().toISOString() });
+  await syncOutreachStatusTab();
+  return row;
 }
 
 async function refreshValidation() {
@@ -154,6 +176,7 @@ async function refreshValidation() {
     });
     results.push({ id: row.id, address: row.propertyAddress, status: nextStatus, reasons: result.reasons });
   }
+  results.sheetSync = await syncOutreachStatusTab();
   return results;
 }
 
@@ -208,6 +231,7 @@ async function submitForApproval() {
     store.updateQueueRow(row.id, fields);
     results.push({ id: row.id, address: row.propertyAddress, status: fields.status, problems });
   }
+  results.sheetSync = await syncOutreachStatusTab();
   return results;
 }
 
@@ -222,6 +246,7 @@ async function approveOutreach() {
     store.updateQueueRow(row.id, { status: 'Approved', lastUpdated: new Date().toISOString() });
     results.push({ id: row.id, address: row.propertyAddress });
   }
+  results.sheetSync = await syncOutreachStatusTab();
   return results;
 }
 
@@ -262,7 +287,7 @@ async function sendApprovedEmails() {
 
     if (sendingEnabled) {
       await gmailClient.sendEmail({ to: row.agentEmail, subject: row.renderedEmailSubject, body: row.renderedEmailBody });
-      store.updateQueueRow(row.id, { status: 'Contacted', lastUpdated: new Date().toISOString() });
+      store.updateQueueRow(row.id, { status: 'Contacted', contactedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
       store.appendCommunicationLog({ ...logBase, result: 'Sent', notes: '' });
       results.push({ id: row.id, address: row.propertyAddress, result: 'Sent' });
     } else {
@@ -270,7 +295,191 @@ async function sendApprovedEmails() {
       results.push({ id: row.id, address: row.propertyAddress, result: 'Dry Run' });
     }
   }
-  return { sendingEnabled, results };
+  const sheetSync = await syncOutreachStatusTab();
+  return { sendingEnabled, results, sheetSync };
+}
+
+const FOLLOWUP_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
+
+function last10Digits(phone) {
+  return String(phone || '').replace(/\D/g, '').slice(-10);
+}
+
+/**
+ * Google Voice's notification email body wraps the actual reply in a
+ * leading logo-link line, an optional "Google Voice" banner, and a
+ * long account/help-center footer -- strip all of that so what's left
+ * is just what the agent actually typed. Verified against real
+ * plaintext notification bodies: the footer's anchor words aren't
+ * adjacent ("YOUR ACCOUNT <url> HELP CENTER"), so the footer markers
+ * below allow anything (including embedded links) between them.
+ */
+function extractReplyText(rawBody) {
+  let text = String(rawBody || '');
+  const footerMarkers = [
+    /YOUR ACCOUNT[\s\S]*?HELP CENTER[\s\S]*?HELP FORUM/i,
+    /To respond to this text message/i,
+    /This email was sent to you because/i
+  ];
+  for (const marker of footerMarkers) {
+    const cut = text.search(marker);
+    if (cut !== -1) { text = text.slice(0, cut); break; }
+  }
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const contentLines = lines.filter((l) => !/^<https?:\/\/\S+>$/.test(l) && !/^Google Voice$/i.test(l));
+  return contentLines.join('\n').trim();
+}
+
+function classifyReply(text) {
+  const normalized = text.trim().toUpperCase();
+  if (/^YES\b/.test(normalized)) return 'yes';
+  if (/^NO\b/.test(normalized) || /\b(STOP|UNSUBSCRIBE|REMOVE ME)\b/.test(normalized)) return 'no';
+  return 'ambiguous';
+}
+
+/**
+ * Posts to Google Chat and swallows any failure (webhook not
+ * configured yet, network error, etc.) into a returned error string
+ * instead of throwing -- a notification problem must never stop the
+ * actual reply-routing above, which already happened by the time this
+ * runs.
+ */
+async function notifyGoogleChat(text) {
+  try {
+    await postToGoogleChat(text);
+    return null;
+  } catch (err) {
+    return err.message;
+  }
+}
+
+/**
+ * Checks Gmail for Google Voice reply notifications matching any row
+ * currently "Contacted", and either routes it forward (YES -> Handed
+ * Off via Replied, NO/opt-out language -> Opted Out, anything else ->
+ * Replied for a human to read) or, if three days have passed with no
+ * reply at all, moves it to Follow-Up Due. Never touches rows in any
+ * other status -- once a row leaves Contacted, it's not reconsidered.
+ */
+/**
+ * Mirrors current outreach status back into the Flip Scout Leads
+ * sheet's "Contacted?" column so Bryan/the team can see progress
+ * without opening the app -- Handed Off wins if two Outreach Queue
+ * rows share an address with different statuses (more informative
+ * than "Following Up" once a human has actually taken over). Runs
+ * regardless of whether there were any new Gmail replies to check,
+ * since existing rows' status can still need re-syncing.
+ */
+async function syncContactedColumn() {
+  const statusByAddress = {};
+  for (const r of store.getQueueRows(() => true)) {
+    let sheetStatus = null;
+    if (r.status === 'Handed Off') sheetStatus = 'Handed Off';
+    else if (['Contacted', 'Follow-Up Due', 'Replied'].includes(r.status)) sheetStatus = 'Following Up';
+    if (!sheetStatus) continue;
+    if (statusByAddress[r.propertyAddress] !== 'Handed Off') {
+      statusByAddress[r.propertyAddress] = sheetStatus;
+    }
+  }
+  try {
+    return await updateContactedColumn(statusByAddress);
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+/**
+ * Full-overwrite mirror of every Outreach Queue row that has agent
+ * info into the app-owned "Outreach Status" tab -- read-only
+ * reporting, not a second source of truth (see writeOutreachStatusSnapshot).
+ * Called from every outreach action so the tab stays essentially
+ * always current. Never throws -- a sync failure must not break the
+ * action that triggered it.
+ */
+async function syncOutreachStatusTab() {
+  const now = new Date();
+  const rows = store.getQueueRows((r) => r.agentPhone).map((r) => {
+    const contactedAt = r.contactedAt ? new Date(r.contactedAt) : null;
+    const daysSinceContacted = contactedAt ? Math.floor((now - contactedAt) / (24 * 60 * 60 * 1000)) : null;
+    return {
+      propertyAddress: r.propertyAddress,
+      agentName: r.agentName,
+      agentPhone: r.agentPhone,
+      status: r.status,
+      campaign: r.campaign,
+      contactedAt: r.contactedAt,
+      daysSinceContacted,
+      lastUpdated: r.lastUpdated
+    };
+  });
+  try {
+    return await writeOutreachStatusSnapshot(rows);
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+async function checkReplies() {
+  const rows = store.getQueueRows((r) => r.status === 'Contacted');
+  if (rows.length === 0) {
+    const results = [];
+    results.sheetSync = await syncContactedColumn();
+    results.statusTabSync = await syncOutreachStatusTab();
+    return results;
+  }
+
+  const earliestContacted = rows.reduce((min, r) => {
+    if (!r.contactedAt) return min;
+    const t = new Date(r.contactedAt);
+    return !min || t < min ? t : min;
+  }, null);
+
+  const emails = await gmailClient.searchVoiceReplyEmails(earliestContacted);
+  const now = new Date();
+  const results = [];
+
+  for (const row of rows) {
+    const rowDigits = last10Digits(row.agentPhone);
+    const contactedAt = row.contactedAt ? new Date(row.contactedAt) : null;
+    const matches = emails
+      .filter((e) => e.fromPhoneDigits.slice(-10) === rowDigits && (!contactedAt || e.date >= contactedAt))
+      .sort((a, b) => b.date - a.date);
+
+    if (matches.length > 0) {
+      const replyText = extractReplyText(matches[0].body);
+      const classification = classifyReply(replyText);
+      const timestamp = new Date().toISOString();
+
+      if (classification === 'yes') {
+        store.updateQueueRow(row.id, { status: 'Replied', lastUpdated: timestamp });
+        store.updateQueueRow(row.id, { status: 'Handed Off', qualificationReasons: 'Auto-routed: reply was "' + replyText + '"', lastUpdated: timestamp });
+        const notifyError = await notifyGoogleChat(
+          'Positive reply: ' + row.agentName + ' (' + row.agentPhone + ') on ' + row.propertyAddress +
+          ' replied "' + replyText + '" -- time to follow up directly.'
+        );
+        results.push({ id: row.id, address: row.propertyAddress, result: 'Handed Off', replyText, notifyError });
+      } else if (classification === 'no') {
+        store.updateQueueRow(row.id, { status: 'Opted Out', qualificationReasons: 'Auto-routed: reply was "' + replyText + '"', lastUpdated: timestamp });
+        const notifyError = await notifyGoogleChat(
+          'Opt-out: ' + row.agentName + ' (' + row.agentPhone + ') on ' + row.propertyAddress +
+          ' replied "' + replyText + '" -- marked Opted Out, no further outreach will be sent.'
+        );
+        results.push({ id: row.id, address: row.propertyAddress, result: 'Opted Out', replyText, notifyError });
+      } else {
+        store.updateQueueRow(row.id, { status: 'Replied', qualificationReasons: 'Reply needs human review: "' + replyText + '"', lastUpdated: timestamp });
+        results.push({ id: row.id, address: row.propertyAddress, result: 'Replied (needs review)', replyText });
+      }
+    } else if (contactedAt && (now - contactedAt) >= FOLLOWUP_AFTER_MS) {
+      store.updateQueueRow(row.id, { status: 'Follow-Up Due', lastUpdated: new Date().toISOString() });
+      results.push({ id: row.id, address: row.propertyAddress, result: 'Follow-Up Due' });
+    } else {
+      results.push({ id: row.id, address: row.propertyAddress, result: 'No reply yet' });
+    }
+  }
+
+  results.sheetSync = await syncContactedColumn();
+  results.statusTabSync = await syncOutreachStatusTab();
+  return results;
 }
 
 function listRows() {
@@ -297,5 +506,8 @@ module.exports = {
   submitForApproval,
   approveOutreach,
   sendApprovedEmails,
-  listRows
+  checkReplies,
+  listRows,
+  extractReplyText,
+  classifyReply
 };

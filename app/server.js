@@ -122,6 +122,7 @@ const server = http.createServer(async (req, res) => {
     '/outreach/submit-for-approval': () => outreachActions.submitForApproval().then((results) => ({ results })),
     '/outreach/approve': () => outreachActions.approveOutreach().then((results) => ({ results })),
     '/outreach/send-emails': () => outreachActions.sendApprovedEmails().then(({ sendingEnabled, results }) => ({ sendingEnabled, results })),
+    '/outreach/check-replies': () => outreachActions.checkReplies().then((results) => ({ results })),
     '/outreach/add-from-flip-scout': (body) =>
       outreachActions.addFromFlipScout(body.sheetRows, body.campaign).then(({ added, skipped }) => ({ added: added.length, skipped }))
   };

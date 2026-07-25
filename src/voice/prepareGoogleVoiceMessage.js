@@ -24,8 +24,8 @@ function getApprovedSmsRows() {
   return store.getQueueRows((r) => r.status === 'Approved' && r.renderedSmsBody);
 }
 
-function writeVoiceOutcome(id, { status, notes }) {
-  return store.updateQueueRow(id, { status, qualificationReasons: notes, lastUpdated: new Date().toISOString() });
+function writeVoiceOutcome(id, { status, notes, contactedAt }) {
+  return store.updateQueueRow(id, { status, contactedAt, qualificationReasons: notes, lastUpdated: new Date().toISOString() });
 }
 
 const GOOGLE_VOICE_URL = 'https://voice.google.com/u/0/messages';
@@ -45,13 +45,32 @@ async function prepareOne(page, row) {
 
   // Start a new conversation. This selector targets the "Send new
   // message" compose button in the Google Voice messages list.
-  await page.getByRole('button', { name: /send a new message|start a new conversation/i }).click();
+  await page.getByRole('button', { name: /send (a )?new message|start a new conversation/i }).click();
+  await page.waitForTimeout(1500);
 
   // Type the recipient phone number into the "To" field and select it
   // from the suggestion list rather than trusting free text alone.
-  const recipientInput = page.getByRole('combobox', { name: /type a name or phone number/i });
+  const recipientInput = page.getByPlaceholder(/type a name or phone number/i);
   await recipientInput.fill(row.agentPhone);
-  await page.getByText(row.agentPhone, { exact: false }).first().click();
+  await page.waitForTimeout(1500);
+  // Verified against the live UI via Playwright's recorder: the correct
+  // recipient-suggestion control is a proper ARIA button named
+  // "Send to <number>". CAUTION: Google Voice's persistent right-side
+  // call panel shows a sidebar list of frequently-contacted people as
+  // plain <li> elements with no ARIA role at all -- clicking one of
+  // THOSE calls them instead of adding a message recipient (this
+  // previously placed a real, live call to a real contact). Targeting
+  // getByRole('button', ...) is what makes this safe: the call panel's
+  // rows aren't buttons, so this can't match them. Do not change this to
+  // a bare text/li selector.
+  await page.getByRole('button', { name: /^send to/i }).click();
+  // Running the fill/click steps back-to-back with no pause caused a
+  // real, confirmed bug: a stale/leftover draft in the compose box got
+  // sent instead of the freshly-filled text, even though the in-script
+  // verification check (below) read back the correct value. Adding a
+  // pause here before interacting with the compose box is what fixed it
+  // -- verified against the live UI by deliberately re-running slowly.
+  await page.waitForTimeout(1500);
 
   // Type the exact approved message into the compose box.
   const composeBox = page.getByRole('textbox', { name: /type a message/i });
@@ -75,7 +94,7 @@ async function prepareOne(page, row) {
   );
 
   if (answer === 'sent') {
-    return { status: 'Contacted', notes: 'Operator confirmed manual Send in Google Voice.' };
+    return { status: 'Contacted', contactedAt: new Date().toISOString(), notes: 'Operator confirmed manual Send in Google Voice.' };
   }
   if (answer === 'reject') {
     return { status: 'Needs Review', notes: 'Operator rejected the prepared message in Google Voice.' };
