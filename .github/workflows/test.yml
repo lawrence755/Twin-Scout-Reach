@@ -13,4 +13,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+      # Install deps so tests can require their modules. Skip the Playwright
+      # browser download -- the suite only imports the playwright module
+      # (never launches a browser), so the ~130MB Chromium fetch is pure
+      # overhead and a needless point of failure in CI.
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
       - run: node --test tests/*.test.js
