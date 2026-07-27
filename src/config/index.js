@@ -83,6 +83,33 @@ const config = {
     sheetId: process.env.GOOGLE_SHEET_ID || '',
     credentialsPath: resolvePath(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'service-account.json')
   },
+  // Juan's Flip Scout Agent feed -- the Paragon-sourced JSON his agent
+  // publishes. We read the listing-agent contact straight from here (see
+  // src/feed/flipScoutFeed.js and docs/AGENT_CONTACT_SOURCING.md), so no
+  // scraping and no extra sheet columns are involved. Override the URL if
+  // Juan's repo/branch moves.
+  feed: {
+    flipScoutUrl: process.env.FLIP_SCOUT_FEED_URL
+      || 'https://raw.githubusercontent.com/JuanDiaz2025/Juan-s-Autonomous-Real-Estate-Flip-Scout-Agent/claude/python-code-goal-nn6zec/flip_scout/leads_for_sheets.json'
+  },
+  // MLSListings Pro Dashboard -- the authenticated source we pull the
+  // listing agent's contact from, by address (see src/mlslistings/). Login
+  // is done once by hand into a persistent browser profile; username/
+  // password are only used for the optional auto-fill in the login helper
+  // and are never required. Never commit real values -- .env only.
+  mls: {
+    dashboardUrl: process.env.MLS_DASHBOARD_URL || 'https://prodashboard.mlslistings.com/',
+    username: process.env.MLS_USERNAME || '',
+    password: process.env.MLS_PASSWORD || '',
+    scrapeDelayMs: Number(process.env.MLS_SCRAPE_DELAY_MS || 5000)
+  },
+  // Zapier catch-hook that creates the enriched agent in REI BlackBook and
+  // tags them "Real Estate Agent". The enrichment module POSTs
+  // { name, phone, email, address, source } here. Unset -> the webhook
+  // step is skipped (logged), never fatal.
+  zapier: {
+    blackbookWebhookUrl: process.env.ZAPIER_WEBHOOK_URL || ''
+  },
   sender: {
     name: process.env.SENDER_NAME || '',
     phone: process.env.SENDER_PHONE || '',

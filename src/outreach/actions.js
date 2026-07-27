@@ -19,9 +19,11 @@ const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
 const initialEmailTemplate = require('../../templates/initial-email.v2.json');
 const store = require('./store');
 const { getFlipScoutLeads, GOOD_FLIP_QUALITY, writeOutreachStatusSnapshot, getRedfinAgentContacts, getOutreachReviewRows, writeOutreachReviewDetails, syncGoodFlipToOutreachReview } = require('../sheets/sheetsClient');
+const { loadFeedAgentContacts } = require('../feed/flipScoutFeed');
 const gmailClient = require('../gmail/gmailClient');
 const { postToGoogleChat } = require('../notifications/googleChat');
 const { scrapeReiBlackBookContact, checkNotesForDoNotAutomate, getChatHistory, isInboundActivity, REI_PROFILE_DIR } = require('../reiblackbook/scrapeReiBlackBook');
+const { scrapeListingAgent, MLS_PROFILE_DIR } = require('../mlslistings/scrapeMlsListings');
 
 const PRE_APPROVAL_STATUSES = ['Information Needed', 'Needs Review', 'Ready for Drafting'];
 
@@ -38,6 +40,7 @@ function coerceBoolean(value) {
  */
 async function listFlipScoutLeads() {
   const leads = await getFlipScoutLeads();
+  await enrichLeadsWithFeedContact(leads);
   return leads.map((l) => ({
     sheetRow: l.__sheetRow,
     score: l.score,
@@ -50,6 +53,11 @@ async function listFlipScoutLeads() {
     redfinLink: l.redfinLink,
     reiContactLink: l.reiContactLink,
     reiAgentName: l.reiAgentName,
+    // Listing-agent contact carried straight from the Paragon-sourced
+    // feed (blank until Juan's agent + Bryan's sheet emit these columns).
+    agentName: l.agentName,
+    agentPhone: l.agentPhone,
+    agentEmail: l.agentEmail,
     flipQuality: l.flipQuality,
     isGoodFlip: l.flipQuality === GOOD_FLIP_QUALITY
   }));
@@ -66,6 +74,62 @@ function findRedfinAgentContact(propertyAddress, contacts) {
   const target = normalizeAddress(propertyAddress);
   if (!target) return null;
   return (contacts || []).find((c) => normalizeAddress(c.propertyAddress) === target) || null;
+}
+
+/**
+ * Resolves listing-agent contact for a Flip Scout lead, in trust order:
+ *
+ *   1. Agent contact carried on the lead itself -- captured upstream on
+ *      Paragon/MLS by Juan's Flip Scout Agent and delivered through the
+ *      Flip Scout Leads feed (agentName/agentPhone/agentEmail). This is
+ *      the authoritative, no-scrape source; when present it wins.
+ *   2. Bryan's REI BlackBook, when the lead has an "REI Link & Agent
+ *      Name" -- name comes across now; phone/email land later via
+ *      enrichFromReiBlackBook() (a separate page visit).
+ *   3. Cowork's "Redfin Agent Contacts" tab (matched by address) -- a
+ *      fallback only, used when neither source above supplies a value.
+ *
+ * Each field falls through independently, so a lead can take its name
+ * from the feed while its phone/email (until the feed carries them) come
+ * from a fallback. Pure -- no I/O -- so the precedence is unit-testable.
+ * See docs/AGENT_CONTACT_SOURCING.md.
+ */
+function resolveAgentContact(lead, redfinMatch) {
+  const l = lead || {};
+  const rf = redfinMatch || {};
+  const hasReiLink = !!l.reiContactLink;
+  const clean = (v) => (v === '' || v == null ? undefined : v);
+  return {
+    agentName: clean(l.agentName)
+      || (hasReiLink ? clean(l.reiAgentName) : undefined)
+      || clean(rf.agentName),
+    agentPhone: clean(l.agentPhone) || clean(rf.agentPhone) || '',
+    agentEmail: clean(l.agentEmail) || clean(rf.agentEmail)
+  };
+}
+
+/**
+ * Enriches Flip Scout leads with the listing-agent contact from Juan's
+ * Paragon-sourced feed (src/feed/flipScoutFeed.js), matched by address.
+ * Feed contact is written onto lead.agentName/agentPhone/agentEmail
+ * WITHOUT overwriting anything the lead already carries, so a later
+ * resolveAgentContact() treats it as the authoritative source and only
+ * falls back to REI/Redfin for fields the feed didn't supply. Best-effort
+ * -- if the feed can't be read, leads pass through unchanged (they just
+ * fall back to the existing sources). Mutates the leads in place and
+ * returns them.
+ */
+async function enrichLeadsWithFeedContact(leads) {
+  const { contacts } = await loadFeedAgentContacts();
+  if (!contacts || contacts.size === 0) return leads;
+  for (const lead of leads) {
+    const c = contacts.get(normalizeAddress(lead.propertyAddress || ''));
+    if (!c) continue;
+    if (!lead.agentName && c.agentName) lead.agentName = c.agentName;
+    if (!lead.agentPhone && c.agentPhone) lead.agentPhone = c.agentPhone;
+    if (!lead.agentEmail && c.agentEmail) lead.agentEmail = c.agentEmail;
+  }
+  return leads;
 }
 
 /**
@@ -123,6 +187,7 @@ async function lookupRedfinAgentContact(propertyAddress) {
  */
 async function addFromFlipScout(sheetRows, campaign) {
   const leads = await getFlipScoutLeads((l) => sheetRows.includes(l.__sheetRow));
+  await enrichLeadsWithFeedContact(leads);
   const existingKeys = store.getQueueRows().map((r) => r.outreachKey).filter(Boolean);
   const added = [];
   const skipped = [];
@@ -145,9 +210,7 @@ async function addFromFlipScout(sheetRows, campaign) {
   for (const lead of leads) {
     const hasReiLink = !!lead.reiContactLink;
     const redfinMatch = hasReiLink ? null : findRedfinAgentContact(lead.propertyAddress, redfinContacts);
-    const agentName = hasReiLink ? lead.reiAgentName : (redfinMatch ? redfinMatch.agentName : undefined);
-    const agentPhone = redfinMatch ? redfinMatch.agentPhone : '';
-    const agentEmail = redfinMatch ? redfinMatch.agentEmail : undefined;
+    const { agentName, agentPhone, agentEmail } = resolveAgentContact(lead, redfinMatch);
     const outreachKey = buildOutreachKey(agentPhone, lead.propertyAddress, campaign || 'flip-scout');
 
     const review = findOutreachReviewStatus(lead.propertyAddress, reviewRows);
@@ -227,10 +290,20 @@ async function autoQueueFromFlipScout() {
  */
 async function syncGoodFlipLeadsToReview() {
   const leads = await getFlipScoutLeads((l) => l.flipQuality === GOOD_FLIP_QUALITY);
-  const payload = leads.map((l) => ({
-    propertyAddress: l.propertyAddress,
-    agentName: l.reiAgentName || undefined
-  }));
+  await enrichLeadsWithFeedContact(leads);
+  const payload = leads.map((l) => {
+    // Paragon-sourced feed contact is authoritative; the REI link's
+    // agent name is the fallback for the name only. Phone/email pre-fill
+    // the Outreach Review tab straight from the feed when present, so a
+    // reviewer sees them without any scrape/enrichment step.
+    const { agentName, agentPhone, agentEmail } = resolveAgentContact(l, null);
+    return {
+      propertyAddress: l.propertyAddress,
+      agentName,
+      agentPhone: agentPhone || undefined,
+      agentEmail
+    };
+  });
   return syncGoodFlipToOutreachReview(payload);
 }
 
@@ -389,6 +462,71 @@ async function enrichFromReiBlackBook() {
       } catch (err) {
         results.push({ propertyAddress: row.propertyAddress, ok: false, error: err.message });
       }
+    }
+  } finally {
+    await context.close();
+  }
+  return {
+    updated: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results
+  };
+}
+
+/**
+ * Fills in agent phone/email for every Outreach Queue row still missing
+ * one, by searching MLSListings Pro Dashboard for the property by address
+ * and reading the listing agent's contact straight off the MLS detail
+ * page (see src/mlslistings/scrapeMlsListings.js). This is the
+ * authoritative, at-the-source contact -- no Redfin scraping.
+ *
+ * Requires a human to have logged into MLSListings once via
+ * `npm run mlslistings:login` -- this never logs in itself, reuses that
+ * saved session, rate-limits between rows (config.mls.scrapeDelayMs), and
+ * stops per-row (not the whole run) so one address that can't be found
+ * doesn't block the rest of the batch. Also mirrors what it finds into
+ * the "Outreach Review" tab, same as the REI BlackBook enricher.
+ */
+async function enrichFromMlsListings() {
+  const rows = store.getQueueRows((r) => r.propertyAddress && (!r.agentPhone || !r.agentEmail));
+  if (rows.length === 0) return { updated: 0, failed: 0, results: [] };
+
+  // Visible, not headless -- same reasoning as the other scrapers: a
+  // human watching notices an expired session or a changed layout
+  // immediately instead of getting cryptic per-row failures.
+  const context = await chromium.launchPersistentContext(MLS_PROFILE_DIR, { headless: false });
+  const results = [];
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    for (const row of rows) {
+      try {
+        const info = await scrapeListingAgent(page, row.propertyAddress);
+        if (!info.found || (!info.agentPhone && !info.agentEmail)) {
+          results.push({ propertyAddress: row.propertyAddress, ok: false, error: info.found ? 'listing found but no agent contact parsed' : 'no matching listing found' });
+        } else {
+          // Through updateRow() (not a direct store write) so a changed
+          // agent phone recomputes outreachKey/contactKey -- same reason
+          // as the REI BlackBook enricher above.
+          await updateRow(row.id, {
+            agentName: row.agentName || info.agentName || undefined,
+            agentPhone: info.agentPhone || row.agentPhone,
+            agentEmail: info.agentEmail || row.agentEmail
+          });
+          try {
+            await writeOutreachReviewDetails(row.propertyAddress, {
+              agentName: row.agentName || info.agentName,
+              agentPhone: info.agentPhone || row.agentPhone,
+              agentEmail: info.agentEmail || row.agentEmail
+            });
+          } catch (sheetErr) {
+            // Best-effort -- the local queue row is already correct.
+          }
+          results.push({ propertyAddress: row.propertyAddress, ok: true, ...info });
+        }
+      } catch (err) {
+        results.push({ propertyAddress: row.propertyAddress, ok: false, error: err.message });
+      }
+      await page.waitForTimeout(config.mls.scrapeDelayMs);
     }
   } finally {
     await context.close();
@@ -952,9 +1090,11 @@ module.exports = {
   syncGoodFlipLeadsToReview,
   syncOutreachReviewDecisions,
   computeReviewDecisionFields,
+  resolveAgentContact,
   getOutreachReviewSummary,
   lookupRedfinAgentContact,
   enrichFromReiBlackBook,
+  enrichFromMlsListings,
   checkReiBlackBookNotes,
   addRow,
   updateRow,
