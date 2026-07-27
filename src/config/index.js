@@ -34,21 +34,28 @@ require('dotenv').config({ path: ENV_PATH });
 // Reading the file each time makes every ENABLE_* switch an immediate,
 // reliable kill switch. Falls back to process.env only if the file read
 // fails, so a guard can never throw here.
-function isLiveEnabled(envVar, envPath = ENV_PATH) {
+// Reads a raw value straight from the .env file on disk each call (with
+// surrounding quotes stripped), falling back to process.env if the file
+// can't be read. Same freshness guarantee as isLiveEnabled -- used for
+// values that may be edited/added after the app or a job already started
+// (e.g. REI_EMAIL / REI_PASSWORD). Never throws.
+function liveEnvValue(name, envPath = ENV_PATH) {
   try {
     const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
     let value;
     for (const line of lines) {
       const m = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$/);
-      if (m && m[1] === envVar) value = m[2];
+      if (m && m[1] === name) value = m[2];
     }
-    if (value !== undefined) {
-      return value.trim().replace(/^['"]|['"]$/g, '').toLowerCase() === 'true';
-    }
+    if (value !== undefined) return value.trim().replace(/^['"]|['"]$/g, '');
   } catch (err) {
     // fall through to process.env
   }
-  return String(process.env[envVar] || '').trim().toLowerCase() === 'true';
+  return process.env[name] || '';
+}
+
+function isLiveEnabled(envVar, envPath = ENV_PATH) {
+  return liveEnvValue(envVar, envPath).trim().toLowerCase() === 'true';
 }
 
 // envValue may be unset, a relative path, or an absolute path.
@@ -71,6 +78,7 @@ const config = {
     };
   },
   isLiveEnabled,
+  liveEnvValue,
   sheets: {
     sheetId: process.env.GOOGLE_SHEET_ID || '',
     credentialsPath: resolvePath(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'service-account.json')
