@@ -95,6 +95,13 @@ const config = {
     password: process.env.MLS_PASSWORD || '',
     scrapeDelayMs: Number(process.env.MLS_SCRAPE_DELAY_MS || 5000)
   },
+  // Zapier catch-hook that creates the enriched agent in REI BlackBook and
+  // tags them "Real Estate Agent". The enrichment module POSTs
+  // { name, phone, email, address, source } here. Unset -> the webhook
+  // step is skipped (logged), never fatal.
+  zapier: {
+    blackbookWebhookUrl: process.env.ZAPIER_WEBHOOK_URL || ''
+  },
   sender: {
     name: process.env.SENDER_NAME || '',
     phone: process.env.SENDER_PHONE || '',
