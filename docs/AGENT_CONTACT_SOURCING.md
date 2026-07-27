@@ -74,6 +74,46 @@ this app starts using them — no further change here.
     Each field falls through independently. Covered by
     `tests/resolveAgentContact.test.js`.
 
+## Second at-source path: MLSListings Pro Dashboard (fully in our control)
+
+The feed path above depends on Juan adding the agent fields upstream. The
+MLSListings path needs no one else: we pull the listing agent's contact
+straight from our **own authenticated MLSListings Pro Dashboard**
+subscription (`https://prodashboard.mlslistings.com/`), searched by
+address. The agent's name/phone/email are on the MLS listing itself, so
+this is at-the-source and reliable — and, unlike Redfin, it's a logged-in
+session we're entitled to, not a bot fight.
+
+Built exactly like the REI BlackBook enricher (same persistent-profile
+login pattern, same write-back to the Outreach Review tab):
+
+- `src/mlslistings/scrapeMlsListings.js` — `scrapeListingAgent(page, address)`
+  searches by address, opens the listing, and reads the agent contact.
+  `extractAgentContact()` is pure, text-pattern based, and unit-tested
+  (`tests/mlsListings.test.js`).
+- `scripts/login-mlslistings.js` (`npm run mlslistings:login`) — opens a
+  visible window to log in once by hand (handles MFA/CAPTCHA); the session
+  persists in `.mlslistings-profile/` (gitignored). Optional
+  `MLS_USERNAME`/`MLS_PASSWORD` pre-fill the form but are never required.
+- `src/outreach/actions.js#enrichFromMlsListings` (`npm run mlslistings:enrich`)
+  — visits every queue row still missing a phone/email, fills it from the
+  MLS listing, rate-limited by `MLS_SCRAPE_DELAY_MS`, best-effort per row,
+  and mirrors results into the Outreach Review tab.
+
+**Not yet production-ready:** the search/detail-page selectors are
+`TODO(selectors)` placeholders until someone inspects the live logged-in
+pages. Until they're filled in, `mlslistings:enrich` reports "not wired to
+the live UI yet" per row — by design. It's also deliberately **not** wired
+into the automation loop yet; run it manually first, confirm the
+selectors, then wire it in. To finish it: log in, note the exact
+search-by-address steps and where the agent name/phone/email appear on the
+detail page, and drop those selectors into the marked spots.
+
+**Compliance:** authenticated access to our own MLS subscription for
+listing-agent contact (info the MLS shares with members to facilitate
+transactions). Keep it to that — rate-limited, one lead at a time, no bulk
+export or redistribution — and respect MLSListings' Terms of Use.
+
 ## Redfin scraper status
 
 `src/redfin/` (the in-app Playwright scraper) is **fallback-only** and is

@@ -9,6 +9,8 @@
     "voice:prepare": "node src/voice/prepareGoogleVoiceMessage.js",
     "voice:autosend": "node src/voice/autoSendGoogleVoiceMessage.js",
     "transfer:good-flip": "node scripts/transfer-good-flip.js",
+    "mlslistings:login": "node scripts/login-mlslistings.js",
+    "mlslistings:enrich": "node scripts/enrich-mlslistings.js",
     "reiblackbook:login": "node scripts/login-reiblackbook.js",
     "reiblackbook:enrich": "node scripts/enrich-reiblackbook.js",
     "reiblackbook:check-notes": "node scripts/check-reiblackbook-notes.js",

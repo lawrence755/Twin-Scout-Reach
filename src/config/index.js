@@ -84,6 +84,17 @@ const config = {
     flipScoutUrl: process.env.FLIP_SCOUT_FEED_URL
       || 'https://raw.githubusercontent.com/JuanDiaz2025/Juan-s-Autonomous-Real-Estate-Flip-Scout-Agent/claude/python-code-goal-nn6zec/flip_scout/leads_for_sheets.json'
   },
+  // MLSListings Pro Dashboard -- the authenticated source we pull the
+  // listing agent's contact from, by address (see src/mlslistings/). Login
+  // is done once by hand into a persistent browser profile; username/
+  // password are only used for the optional auto-fill in the login helper
+  // and are never required. Never commit real values -- .env only.
+  mls: {
+    dashboardUrl: process.env.MLS_DASHBOARD_URL || 'https://prodashboard.mlslistings.com/',
+    username: process.env.MLS_USERNAME || '',
+    password: process.env.MLS_PASSWORD || '',
+    scrapeDelayMs: Number(process.env.MLS_SCRAPE_DELAY_MS || 5000)
+  },
   sender: {
     name: process.env.SENDER_NAME || '',
     phone: process.env.SENDER_PHONE || '',

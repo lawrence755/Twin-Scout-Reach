@@ -23,6 +23,7 @@ const { loadFeedAgentContacts } = require('../feed/flipScoutFeed');
 const gmailClient = require('../gmail/gmailClient');
 const { postToGoogleChat } = require('../notifications/googleChat');
 const { scrapeReiBlackBookContact, checkNotesForDoNotAutomate, getChatHistory, isInboundActivity, REI_PROFILE_DIR } = require('../reiblackbook/scrapeReiBlackBook');
+const { scrapeListingAgent, MLS_PROFILE_DIR } = require('../mlslistings/scrapeMlsListings');
 
 const PRE_APPROVAL_STATUSES = ['Information Needed', 'Needs Review', 'Ready for Drafting'];
 
@@ -461,6 +462,71 @@ async function enrichFromReiBlackBook() {
       } catch (err) {
         results.push({ propertyAddress: row.propertyAddress, ok: false, error: err.message });
       }
+    }
+  } finally {
+    await context.close();
+  }
+  return {
+    updated: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results
+  };
+}
+
+/**
+ * Fills in agent phone/email for every Outreach Queue row still missing
+ * one, by searching MLSListings Pro Dashboard for the property by address
+ * and reading the listing agent's contact straight off the MLS detail
+ * page (see src/mlslistings/scrapeMlsListings.js). This is the
+ * authoritative, at-the-source contact -- no Redfin scraping.
+ *
+ * Requires a human to have logged into MLSListings once via
+ * `npm run mlslistings:login` -- this never logs in itself, reuses that
+ * saved session, rate-limits between rows (config.mls.scrapeDelayMs), and
+ * stops per-row (not the whole run) so one address that can't be found
+ * doesn't block the rest of the batch. Also mirrors what it finds into
+ * the "Outreach Review" tab, same as the REI BlackBook enricher.
+ */
+async function enrichFromMlsListings() {
+  const rows = store.getQueueRows((r) => r.propertyAddress && (!r.agentPhone || !r.agentEmail));
+  if (rows.length === 0) return { updated: 0, failed: 0, results: [] };
+
+  // Visible, not headless -- same reasoning as the other scrapers: a
+  // human watching notices an expired session or a changed layout
+  // immediately instead of getting cryptic per-row failures.
+  const context = await chromium.launchPersistentContext(MLS_PROFILE_DIR, { headless: false });
+  const results = [];
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    for (const row of rows) {
+      try {
+        const info = await scrapeListingAgent(page, row.propertyAddress);
+        if (!info.found || (!info.agentPhone && !info.agentEmail)) {
+          results.push({ propertyAddress: row.propertyAddress, ok: false, error: info.found ? 'listing found but no agent contact parsed' : 'no matching listing found' });
+        } else {
+          // Through updateRow() (not a direct store write) so a changed
+          // agent phone recomputes outreachKey/contactKey -- same reason
+          // as the REI BlackBook enricher above.
+          await updateRow(row.id, {
+            agentName: row.agentName || info.agentName || undefined,
+            agentPhone: info.agentPhone || row.agentPhone,
+            agentEmail: info.agentEmail || row.agentEmail
+          });
+          try {
+            await writeOutreachReviewDetails(row.propertyAddress, {
+              agentName: row.agentName || info.agentName,
+              agentPhone: info.agentPhone || row.agentPhone,
+              agentEmail: info.agentEmail || row.agentEmail
+            });
+          } catch (sheetErr) {
+            // Best-effort -- the local queue row is already correct.
+          }
+          results.push({ propertyAddress: row.propertyAddress, ok: true, ...info });
+        }
+      } catch (err) {
+        results.push({ propertyAddress: row.propertyAddress, ok: false, error: err.message });
+      }
+      await page.waitForTimeout(config.mls.scrapeDelayMs);
     }
   } finally {
     await context.close();
@@ -1028,6 +1094,7 @@ module.exports = {
   getOutreachReviewSummary,
   lookupRedfinAgentContact,
   enrichFromReiBlackBook,
+  enrichFromMlsListings,
   checkReiBlackBookNotes,
   addRow,
   updateRow,
