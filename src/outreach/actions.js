@@ -50,6 +50,11 @@ async function listFlipScoutLeads() {
     redfinLink: l.redfinLink,
     reiContactLink: l.reiContactLink,
     reiAgentName: l.reiAgentName,
+    // Listing-agent contact carried straight from the Paragon-sourced
+    // feed (blank until Juan's agent + Bryan's sheet emit these columns).
+    agentName: l.agentName,
+    agentPhone: l.agentPhone,
+    agentEmail: l.agentEmail,
     flipQuality: l.flipQuality,
     isGoodFlip: l.flipQuality === GOOD_FLIP_QUALITY
   }));
@@ -66,6 +71,38 @@ function findRedfinAgentContact(propertyAddress, contacts) {
   const target = normalizeAddress(propertyAddress);
   if (!target) return null;
   return (contacts || []).find((c) => normalizeAddress(c.propertyAddress) === target) || null;
+}
+
+/**
+ * Resolves listing-agent contact for a Flip Scout lead, in trust order:
+ *
+ *   1. Agent contact carried on the lead itself -- captured upstream on
+ *      Paragon/MLS by Juan's Flip Scout Agent and delivered through the
+ *      Flip Scout Leads feed (agentName/agentPhone/agentEmail). This is
+ *      the authoritative, no-scrape source; when present it wins.
+ *   2. Bryan's REI BlackBook, when the lead has an "REI Link & Agent
+ *      Name" -- name comes across now; phone/email land later via
+ *      enrichFromReiBlackBook() (a separate page visit).
+ *   3. Cowork's "Redfin Agent Contacts" tab (matched by address) -- a
+ *      fallback only, used when neither source above supplies a value.
+ *
+ * Each field falls through independently, so a lead can take its name
+ * from the feed while its phone/email (until the feed carries them) come
+ * from a fallback. Pure -- no I/O -- so the precedence is unit-testable.
+ * See docs/AGENT_CONTACT_SOURCING.md.
+ */
+function resolveAgentContact(lead, redfinMatch) {
+  const l = lead || {};
+  const rf = redfinMatch || {};
+  const hasReiLink = !!l.reiContactLink;
+  const clean = (v) => (v === '' || v == null ? undefined : v);
+  return {
+    agentName: clean(l.agentName)
+      || (hasReiLink ? clean(l.reiAgentName) : undefined)
+      || clean(rf.agentName),
+    agentPhone: clean(l.agentPhone) || clean(rf.agentPhone) || '',
+    agentEmail: clean(l.agentEmail) || clean(rf.agentEmail)
+  };
 }
 
 /**
@@ -145,9 +182,7 @@ async function addFromFlipScout(sheetRows, campaign) {
   for (const lead of leads) {
     const hasReiLink = !!lead.reiContactLink;
     const redfinMatch = hasReiLink ? null : findRedfinAgentContact(lead.propertyAddress, redfinContacts);
-    const agentName = hasReiLink ? lead.reiAgentName : (redfinMatch ? redfinMatch.agentName : undefined);
-    const agentPhone = redfinMatch ? redfinMatch.agentPhone : '';
-    const agentEmail = redfinMatch ? redfinMatch.agentEmail : undefined;
+    const { agentName, agentPhone, agentEmail } = resolveAgentContact(lead, redfinMatch);
     const outreachKey = buildOutreachKey(agentPhone, lead.propertyAddress, campaign || 'flip-scout');
 
     const review = findOutreachReviewStatus(lead.propertyAddress, reviewRows);
@@ -227,10 +262,19 @@ async function autoQueueFromFlipScout() {
  */
 async function syncGoodFlipLeadsToReview() {
   const leads = await getFlipScoutLeads((l) => l.flipQuality === GOOD_FLIP_QUALITY);
-  const payload = leads.map((l) => ({
-    propertyAddress: l.propertyAddress,
-    agentName: l.reiAgentName || undefined
-  }));
+  const payload = leads.map((l) => {
+    // Paragon-sourced feed contact is authoritative; the REI link's
+    // agent name is the fallback for the name only. Phone/email pre-fill
+    // the Outreach Review tab straight from the feed when present, so a
+    // reviewer sees them without any scrape/enrichment step.
+    const { agentName, agentPhone, agentEmail } = resolveAgentContact(l, null);
+    return {
+      propertyAddress: l.propertyAddress,
+      agentName,
+      agentPhone: agentPhone || undefined,
+      agentEmail
+    };
+  });
   return syncGoodFlipToOutreachReview(payload);
 }
 
@@ -952,6 +996,7 @@ module.exports = {
   syncGoodFlipLeadsToReview,
   syncOutreachReviewDecisions,
   computeReviewDecisionFields,
+  resolveAgentContact,
   getOutreachReviewSummary,
   lookupRedfinAgentContact,
   enrichFromReiBlackBook,
