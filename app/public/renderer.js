@@ -335,7 +335,10 @@
     leads.forEach((l) => {
       const tr = document.createElement('tr');
       const linkCell = l.redfinLink ? `<a href="${escapeHtml(l.redfinLink)}" target="_blank" rel="noopener">link</a>` : '';
-      tr.innerHTML = `<td>${escapeHtml(l.score)}</td><td>${escapeHtml(l.recommendation)}</td><td>${flipQualityBadge(l.flipQuality)}</td><td>${escapeHtml(l.address)}</td><td>${escapeHtml(l.city)}</td><td>${escapeHtml(l.arv)}</td><td>${escapeHtml(l.grossProfitLight)}</td><td>${linkCell}</td>`;
+      const reiCell = l.reiContactLink
+        ? `<a href="${escapeHtml(l.reiContactLink)}" target="_blank" rel="noopener">${escapeHtml(l.reiAgentName || 'REI contact')}</a>`
+        : escapeHtml(l.reiAgentName || '');
+      tr.innerHTML = `<td>${escapeHtml(l.score)}</td><td>${escapeHtml(l.recommendation)}</td><td>${flipQualityBadge(l.flipQuality)}</td><td>${reiCell}</td><td>${escapeHtml(l.address)}</td><td>${escapeHtml(l.city)}</td><td>${escapeHtml(l.arv)}</td><td>${escapeHtml(l.grossProfitLight)}</td><td>${linkCell}</td>`;
       tbody.appendChild(tr);
     });
     appendLog('system', 'Showing ' + leads.length + ' of ' + allFlipScoutLeads.length + ' Flip Scout lead(s)' + (goodOnly ? ' (Good Flip only).' : '.'));

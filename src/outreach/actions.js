@@ -48,6 +48,8 @@ async function listFlipScoutLeads() {
     grossProfitLight: l.grossProfitLight,
     risks: l.risks,
     redfinLink: l.redfinLink,
+    reiContactLink: l.reiContactLink,
+    reiAgentName: l.reiAgentName,
     flipQuality: l.flipQuality,
     isGoodFlip: l.flipQuality === GOOD_FLIP_QUALITY
   }));
