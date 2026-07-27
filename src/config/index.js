@@ -75,6 +75,15 @@ const config = {
     sheetId: process.env.GOOGLE_SHEET_ID || '',
     credentialsPath: resolvePath(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'service-account.json')
   },
+  // Juan's Flip Scout Agent feed -- the Paragon-sourced JSON his agent
+  // publishes. We read the listing-agent contact straight from here (see
+  // src/feed/flipScoutFeed.js and docs/AGENT_CONTACT_SOURCING.md), so no
+  // scraping and no extra sheet columns are involved. Override the URL if
+  // Juan's repo/branch moves.
+  feed: {
+    flipScoutUrl: process.env.FLIP_SCOUT_FEED_URL
+      || 'https://raw.githubusercontent.com/JuanDiaz2025/Juan-s-Autonomous-Real-Estate-Flip-Scout-Agent/claude/python-code-goal-nn6zec/flip_scout/leads_for_sheets.json'
+  },
   sender: {
     name: process.env.SENDER_NAME || '',
     phone: process.env.SENDER_PHONE || '',

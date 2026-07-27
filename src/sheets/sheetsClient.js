@@ -42,16 +42,7 @@ const FLIP_SCOUT_HEADERS = {
   'Redfin Link': 'redfinLink',
   'First Added': 'firstAdded',
   'Flip Quality': 'flipQuality',
-  'REI Link & Agent Name': 'reiAgentName',
-  // Listing-agent contact captured upstream on Paragon/MLS by Juan's
-  // Flip Scout Agent and carried through its leads_for_sheets.json feed
-  // (see apps-script/FlipScoutSheet.js). This is the authoritative,
-  // no-scrape source for agent contact -- read here if the columns
-  // exist, ignored if they don't yet, so this is safe to ship ahead of
-  // the feed/Apps Script actually emitting them. See docs/AGENT_CONTACT_SOURCING.md.
-  'Agent Name': 'agentName',
-  'Agent Phone': 'agentPhone',
-  'Agent Email': 'agentEmail'
+  'REI Link & Agent Name': 'reiAgentName'
 };
 
 const GOOD_FLIP_QUALITY = 'Good Flip';

@@ -19,6 +19,7 @@ const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
 const initialEmailTemplate = require('../../templates/initial-email.v2.json');
 const store = require('./store');
 const { getFlipScoutLeads, GOOD_FLIP_QUALITY, writeOutreachStatusSnapshot, getRedfinAgentContacts, getOutreachReviewRows, writeOutreachReviewDetails, syncGoodFlipToOutreachReview } = require('../sheets/sheetsClient');
+const { loadFeedAgentContacts } = require('../feed/flipScoutFeed');
 const gmailClient = require('../gmail/gmailClient');
 const { postToGoogleChat } = require('../notifications/googleChat');
 const { scrapeReiBlackBookContact, checkNotesForDoNotAutomate, getChatHistory, isInboundActivity, REI_PROFILE_DIR } = require('../reiblackbook/scrapeReiBlackBook');
@@ -38,6 +39,7 @@ function coerceBoolean(value) {
  */
 async function listFlipScoutLeads() {
   const leads = await getFlipScoutLeads();
+  await enrichLeadsWithFeedContact(leads);
   return leads.map((l) => ({
     sheetRow: l.__sheetRow,
     score: l.score,
@@ -106,6 +108,30 @@ function resolveAgentContact(lead, redfinMatch) {
 }
 
 /**
+ * Enriches Flip Scout leads with the listing-agent contact from Juan's
+ * Paragon-sourced feed (src/feed/flipScoutFeed.js), matched by address.
+ * Feed contact is written onto lead.agentName/agentPhone/agentEmail
+ * WITHOUT overwriting anything the lead already carries, so a later
+ * resolveAgentContact() treats it as the authoritative source and only
+ * falls back to REI/Redfin for fields the feed didn't supply. Best-effort
+ * -- if the feed can't be read, leads pass through unchanged (they just
+ * fall back to the existing sources). Mutates the leads in place and
+ * returns them.
+ */
+async function enrichLeadsWithFeedContact(leads) {
+  const { contacts } = await loadFeedAgentContacts();
+  if (!contacts || contacts.size === 0) return leads;
+  for (const lead of leads) {
+    const c = contacts.get(normalizeAddress(lead.propertyAddress || ''));
+    if (!c) continue;
+    if (!lead.agentName && c.agentName) lead.agentName = c.agentName;
+    if (!lead.agentPhone && c.agentPhone) lead.agentPhone = c.agentPhone;
+    if (!lead.agentEmail && c.agentEmail) lead.agentEmail = c.agentEmail;
+  }
+  return leads;
+}
+
+/**
  * Looks up one address in the "Outreach Review" tab -- the authoritative,
  * human-set gate for whether a lead is actually clear for automated
  * outreach (separate from Flip Scout Leads itself, which stays owned
@@ -160,6 +186,7 @@ async function lookupRedfinAgentContact(propertyAddress) {
  */
 async function addFromFlipScout(sheetRows, campaign) {
   const leads = await getFlipScoutLeads((l) => sheetRows.includes(l.__sheetRow));
+  await enrichLeadsWithFeedContact(leads);
   const existingKeys = store.getQueueRows().map((r) => r.outreachKey).filter(Boolean);
   const added = [];
   const skipped = [];
@@ -262,6 +289,7 @@ async function autoQueueFromFlipScout() {
  */
 async function syncGoodFlipLeadsToReview() {
   const leads = await getFlipScoutLeads((l) => l.flipQuality === GOOD_FLIP_QUALITY);
+  await enrichLeadsWithFeedContact(leads);
   const payload = leads.map((l) => {
     // Paragon-sourced feed contact is authoritative; the REI link's
     // agent name is the fallback for the name only. Phone/email pre-fill
