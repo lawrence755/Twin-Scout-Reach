@@ -202,6 +202,14 @@ ipcMain.handle('outreach:check-replies', async () => {
   }
 });
 
+ipcMain.handle('outreach:review-summary', async () => {
+  try {
+    return { ok: true, summary: await outreachActions.getOutreachReviewSummary() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('outreach:list-rows', async () => {
   try {
     return { ok: true, rows: await outreachActions.listRows() };

@@ -32,7 +32,6 @@
     <nav class="tabs" role="tablist">
       <button class="tab-btn active" data-tab="dashboard" role="tab">Dashboard</button>
       <button class="tab-btn" data-tab="flip-scout" role="tab">Flip Scout Leads</button>
-      <button class="tab-btn" data-tab="outreach" role="tab">Outreach Queue</button>
       <button class="tab-btn" data-tab="automation" role="tab">Automation</button>
       <button class="tab-btn" data-tab="settings" role="tab">Settings</button>
     </nav>
@@ -43,29 +42,29 @@
         <div class="stat-grid" id="stat-grid">
           <div class="stat-card" data-stat="total">
             <span class="stat-value">–</span>
-            <span class="stat-label">Total in Queue</span>
+            <span class="stat-label">Leads in Outreach Review</span>
           </div>
-          <div class="stat-card" data-stat="needsAction">
+          <div class="stat-card" data-stat="awaitingReview">
             <span class="stat-value">–</span>
-            <span class="stat-label">Needs Action</span>
+            <span class="stat-label">Awaiting Your Review</span>
           </div>
-          <div class="stat-card" data-stat="inProgress">
+          <div class="stat-card stat-good" data-stat="ready">
             <span class="stat-value">–</span>
-            <span class="stat-label">In Progress</span>
+            <span class="stat-label">Ready for Outreach (Yes)</span>
           </div>
-          <div class="stat-card stat-good" data-stat="handedOff">
+          <div class="stat-card" data-stat="notReady">
             <span class="stat-value">–</span>
-            <span class="stat-label">Handed Off</span>
+            <span class="stat-label">Marked No / Not Ready</span>
           </div>
-          <div class="stat-card stat-muted" data-stat="closedOut">
+          <div class="stat-card stat-muted" data-stat="missingPhone">
             <span class="stat-value">–</span>
-            <span class="stat-label">Opted Out / Rejected</span>
+            <span class="stat-label">Missing Agent Phone</span>
           </div>
         </div>
 
         <div class="panel">
           <div class="panel-header">
-            <h2>Status Breakdown</h2>
+            <h2>Ready-for-Outreach Breakdown <span class="muted-tag">from the Outreach Review tab</span></h2>
             <button id="refresh-dashboard-btn" class="btn btn-ghost btn-sm">Refresh</button>
           </div>
           <div id="status-breakdown" class="status-breakdown"></div>
@@ -73,10 +72,11 @@
 
         <div class="panel">
           <h2>Quick Actions</h2>
+          <p class="note">Leads are driven entirely from the Google Sheet: Bryan marks a lead <strong>Good Flip</strong> &rarr; it appears in the <strong>Outreach Review</strong> tab &rarr; set <strong>Ready for Automated Outreach? = Yes</strong> there to release it. The automation loop below does the rest; progress shows up in the <strong>Outreach Status</strong> tab.</p>
           <div class="quick-actions">
             <button class="btn btn-secondary" data-goto-tab="flip-scout">Browse Flip Scout Leads</button>
-            <button class="btn btn-secondary" data-goto-tab="outreach">Review Outreach Queue</button>
-            <button class="btn btn-secondary" data-goto-tab="automation">Run Automation Jobs</button>
+            <button class="btn btn-secondary" data-goto-tab="automation">Run Automation</button>
+            <button id="open-sheet-btn-2" class="btn btn-secondary">Open Spreadsheet ↗</button>
           </div>
         </div>
       </section>
@@ -87,67 +87,14 @@
           <div class="panel-header">
             <h2>Flip Scout Leads <span class="muted-tag">Bryan's, read-only</span></h2>
           </div>
+          <p class="note">A read-only view of Bryan's leads. To start outreach, mark a lead <strong>Good Flip</strong> in the sheet — it flows to the Outreach Review tab automatically on the next automation cycle.</p>
           <div class="toolbar">
             <button id="load-flip-scout-btn" class="btn btn-primary">Load / refresh leads</button>
-            <input id="flip-scout-campaign" class="input" placeholder="Campaign" value="flip-scout" />
-            <button id="add-selected-flip-scout-btn" class="btn btn-secondary">Add selected to Outreach Queue</button>
-          </div>
-          <div class="toolbar">
             <label class="checkbox-label"><input type="checkbox" id="good-flip-only-filter" checked /> Show only Good Flip leads</label>
-            <button id="select-all-good-flip-btn" class="btn btn-ghost btn-sm">Select all Good Flip</button>
           </div>
           <div class="table-wrap">
             <table id="flip-scout-table" class="data-table">
-              <thead><tr><th></th><th>Score</th><th>Rec.</th><th>Flip Quality</th><th>Address</th><th>City</th><th>ARV</th><th>Profit (Light)</th><th>Redfin Link</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <!-- ---------------- Outreach Queue ---------------- -->
-      <section id="tab-outreach" class="tab-pane">
-        <div class="panel">
-          <div class="panel-header">
-            <h2>Add / Edit Row</h2>
-            <span class="muted-tag" id="add-row-hint">Click a queue row below to edit it</span>
-          </div>
-          <form id="add-row-form" class="add-row-form">
-            <input type="hidden" name="editingId" value="" />
-            <input class="input" name="propertyAddress" placeholder="Property Address" required />
-            <input class="input" name="city" placeholder="City" required />
-            <input class="input" name="agentName" placeholder="Agent Name" required />
-            <input class="input" name="agentPhone" placeholder="Agent Phone" required />
-            <input class="input" name="agentEmail" placeholder="Agent Email (optional)" />
-            <input class="input" name="listingStatus" placeholder="Listing Status" value="Active" />
-            <input class="input" name="daysOnMarket" placeholder="Days On Market" type="number" value="10" />
-            <input class="input" name="campaign" placeholder="Campaign" value="internal-test" />
-            <label class="checkbox-label"><input type="checkbox" name="tenantOccupied" /> Tenant Occupied</label>
-            <label class="checkbox-label"><input type="checkbox" name="needsWork" checked /> Needs Work</label>
-            <label class="checkbox-label"><input type="checkbox" name="appearsRenovated" /> Appears Renovated</label>
-            <label class="checkbox-label"><input type="checkbox" name="compReviewCompleted" checked /> Comp Review Completed</label>
-            <div class="form-buttons">
-              <button type="submit" id="add-row-btn" class="btn btn-primary">Add Row</button>
-              <button type="button" id="cancel-edit-btn" class="btn btn-ghost" style="display:none;">Cancel edit / New row</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <h2>Outreach Queue</h2>
-          </div>
-          <div class="toolbar">
-            <button id="refresh-validation-btn" class="btn btn-secondary">Refresh validation</button>
-            <button id="submit-approval-btn" class="btn btn-secondary">Submit for approval</button>
-            <button id="approve-btn" class="btn btn-secondary">Approve outreach</button>
-            <button id="send-emails-btn" class="btn btn-danger-outline">Send approved emails</button>
-            <button id="check-replies-btn" class="btn btn-secondary">Check for replies</button>
-          </div>
-          <p class="note">Gated by <code>ENABLE_EMAIL_SENDING</code> in <code>.env</code>.</p>
-          <div class="table-wrap">
-            <table id="outreach-table" class="data-table">
-              <thead><tr><th>#</th><th>Address</th><th>Status</th><th>Agent Phone</th><th>Agent Email</th></tr></thead>
+              <thead><tr><th>Score</th><th>Rec.</th><th>Flip Quality</th><th>Address</th><th>City</th><th>ARV</th><th>Profit (Light)</th><th>Redfin Link</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -161,7 +108,7 @@
             <h2>Continuous Automation Loop</h2>
             <span class="muted-tag" id="automation-loop-status">Stopped</span>
           </div>
-          <p class="note">Cycles through auto-queueing new Flip Scout leads, validating, submitting/approving, REI BlackBook enrich/notes/replies/send, email send, and (if Voice Automation is on) Google Voice -- automatically, on a timer. Every real send step is still gated by its own <code>ENABLE_*</code> flag and the "Outreach Review" sheet exactly as it is for the one-shot buttons below.</p>
+          <p class="note">On a timer, cycles through: transferring new Good Flip leads into the Outreach Review tab, pulling in your "Ready for Automated Outreach? = Yes" decisions, REI BlackBook enrich/notes/replies/send, email send, and (if Voice Automation is on) Google Voice. Nothing sends for a lead until you mark it <strong>Yes</strong> in the Outreach Review tab, and every real send step is still gated by its own <code>ENABLE_*</code> flag. Progress is written to the <strong>Outreach Status</strong> tab.</p>
           <div class="toolbar">
             <label class="checkbox-label">
               Cycle interval (minutes)

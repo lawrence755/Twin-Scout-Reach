@@ -165,9 +165,19 @@ class AutomationLoop extends EventEmitter {
   async _runCycle() {
     this.cycleCount++;
 
+    await this._runStep('Transfer Good Flip leads to Outreach Review', async () => {
+      const { added } = await outreachActions.syncGoodFlipLeadsToReview();
+      this.emit('log', { stream: 'stdout', text: 'Added ' + added.length + ' new Good Flip lead(s) to the Outreach Review tab for review.\n' });
+    });
+
     await this._runStep('Auto-queue from Flip Scout Leads', async () => {
       const { added } = await outreachActions.autoQueueFromFlipScout();
       this.emit('log', { stream: 'stdout', text: 'Auto-queued ' + added.length + ' new lead(s) from Flip Scout Leads.\n' });
+    });
+
+    await this._runStep('Sync Outreach Review decisions', async () => {
+      const { updated } = await outreachActions.syncOutreachReviewDecisions();
+      this.emit('log', { stream: 'stdout', text: 'Pulled Outreach Review "Ready?" decisions into ' + updated + ' row(s).\n' });
     });
 
     await this._runStep('Refresh validation', async () => {

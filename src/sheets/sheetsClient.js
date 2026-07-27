@@ -258,6 +258,107 @@ async function getOutreachReviewRows() {
   }).filter((row) => row.propertyAddress);
 }
 
+// Canonical column order for the Outreach Review tab, derived from the
+// header map above so the two can't drift. Address + the human-owned
+// decision columns come first, then the automation-filled detail columns.
+const OUTREACH_REVIEW_ORDERED_HEADERS = Object.keys(OUTREACH_REVIEW_HEADERS);
+
+/**
+ * Makes sure the Outreach Review tab exists and has a header row.
+ * Creates the tab on first use (with the full canonical header), and
+ * writes the header if the tab exists but is empty. Returns the current
+ * header row so callers can map labels to column positions.
+ */
+async function ensureOutreachReviewSheetExists(sheets) {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: config.sheets.sheetId });
+  const exists = (meta.data.sheets || []).some((s) => s.properties.title === OUTREACH_REVIEW_SHEET_NAME);
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: config.sheets.sheetId,
+      requestBody: { requests: [{ addSheet: { properties: { title: OUTREACH_REVIEW_SHEET_NAME } } }] }
+    });
+  }
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_REVIEW_SHEET_NAME}'!1:1`
+  });
+  let headerRow = (data.values || [[]])[0] || [];
+  if (headerRow.length === 0) {
+    headerRow = OUTREACH_REVIEW_ORDERED_HEADERS.slice();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.sheets.sheetId,
+      range: `'${OUTREACH_REVIEW_SHEET_NAME}'!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [headerRow] }
+    });
+  }
+  return headerRow;
+}
+
+/**
+ * Front of the Sheet-driven flow: mirrors "Good Flip" leads from Flip
+ * Scout Leads into the Outreach Review tab, where a human then marks
+ * each "Ready for Automated Outreach?". Good Flip is the trigger;
+ * Outreach Review is the human decision surface.
+ *
+ * Upserts by normalized Address -- appends a row for any lead not
+ * already present, and does NOT touch rows that already exist (so a
+ * human's "Ready?" decision, or their hand-edited agent info, is never
+ * overwritten by a later cycle re-seeing the same Good Flip lead).
+ * Agent name/phone/email are pre-filled where already known; the rest
+ * gets filled in later by enrichment (writeOutreachReviewDetails).
+ *
+ * `leads` is a list of { propertyAddress, agentName?, agentPhone?,
+ * agentEmail? }. Returns { added: [address...], existing: n }.
+ */
+async function syncGoodFlipToOutreachReview(leads) {
+  requireSheetId();
+  const sheets = await getSheetsClient();
+  const headerRow = await ensureOutreachReviewSheetExists(sheets);
+
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_REVIEW_SHEET_NAME}'`
+  });
+  const rows = data.values || [];
+  const addressColIndex = headerRow.indexOf('Address');
+  const existing = new Set();
+  for (let i = 1; i < rows.length; i++) {
+    const addr = normalizeAddress((rows[i] || [])[addressColIndex] || '');
+    if (addr) existing.add(addr);
+  }
+
+  const seenThisRun = new Set();
+  const missing = (leads || []).filter((l) => {
+    const addr = normalizeAddress(l.propertyAddress || '');
+    if (!addr || existing.has(addr) || seenThisRun.has(addr)) return false;
+    seenThisRun.add(addr);
+    return true;
+  });
+  if (missing.length === 0) return { added: [], existing: existing.size };
+
+  const colOf = (label) => headerRow.indexOf(label);
+  const newRows = missing.map((l) => {
+    const row = new Array(headerRow.length).fill('');
+    const put = (label, value) => { const c = colOf(label); if (c !== -1) row[c] = value || ''; };
+    put('Address', l.propertyAddress);
+    put('Agent Name', l.agentName);
+    put('Agent Phone', l.agentPhone);
+    put('Agent Email', l.agentEmail);
+    return row;
+  });
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: config.sheets.sheetId,
+    range: `'${OUTREACH_REVIEW_SHEET_NAME}'!A1`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: newRows }
+  });
+
+  return { added: missing.map((l) => l.propertyAddress), existing: existing.size };
+}
+
 async function ensureOutreachReviewDetailColumns(sheets, headerRow) {
   const missing = OUTREACH_REVIEW_DETAIL_COLUMNS.filter((h) => !headerRow.includes(h));
   if (missing.length === 0) return headerRow;
@@ -349,6 +450,7 @@ module.exports = {
   getRedfinAgentContacts,
   getOutreachReviewRows,
   writeOutreachReviewDetails,
+  syncGoodFlipToOutreachReview,
   FLIP_SCOUT_SHEET_NAME,
   OUTREACH_STATUS_SHEET_NAME,
   REDFIN_AGENT_CONTACTS_SHEET_NAME,

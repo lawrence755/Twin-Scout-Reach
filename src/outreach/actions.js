@@ -18,7 +18,7 @@ const { renderTemplate, extractMergeFields } = require('../../shared/templateEng
 const initialSmsTemplate = require('../../templates/initial-sms.v1.json');
 const initialEmailTemplate = require('../../templates/initial-email.v2.json');
 const store = require('./store');
-const { getFlipScoutLeads, GOOD_FLIP_QUALITY, writeOutreachStatusSnapshot, getRedfinAgentContacts, getOutreachReviewRows, writeOutreachReviewDetails } = require('../sheets/sheetsClient');
+const { getFlipScoutLeads, GOOD_FLIP_QUALITY, writeOutreachStatusSnapshot, getRedfinAgentContacts, getOutreachReviewRows, writeOutreachReviewDetails, syncGoodFlipToOutreachReview } = require('../sheets/sheetsClient');
 const gmailClient = require('../gmail/gmailClient');
 const { postToGoogleChat } = require('../notifications/googleChat');
 const { scrapeReiBlackBookContact, checkNotesForDoNotAutomate, getChatHistory, isInboundActivity, REI_PROFILE_DIR } = require('../reiblackbook/scrapeReiBlackBook');
@@ -211,6 +211,128 @@ async function autoQueueFromFlipScout() {
   const candidates = leads.filter((l) => l.isGoodFlip && !existingRefs.has(l.sheetRow));
   if (candidates.length === 0) return { added: [], skipped: [] };
   return addFromFlipScout(candidates.map((l) => l.sheetRow), 'auto-queue');
+}
+
+/**
+ * Front of the Sheet-driven flow: writes every "Good Flip" lead from
+ * Bryan's Flip Scout Leads tab into the human-owned "Outreach Review"
+ * tab, so a person can mark each "Ready for Automated Outreach? = Yes"
+ * there. Good Flip is the trigger; Outreach Review is the decision
+ * surface. Idempotent -- upserts by address, never overwrites a row a
+ * human has already touched (see syncGoodFlipToOutreachReview). Agent
+ * name is pre-filled from the lead's "REI Link & Agent Name" when
+ * present; phone/email get filled in later by enrichment.
+ */
+async function syncGoodFlipLeadsToReview() {
+  const leads = await getFlipScoutLeads((l) => l.flipQuality === GOOD_FLIP_QUALITY);
+  const payload = leads.map((l) => ({
+    propertyAddress: l.propertyAddress,
+    agentName: l.reiAgentName || undefined
+  }));
+  return syncGoodFlipToOutreachReview(payload);
+}
+
+// Statuses still ahead of an actual send -- the only ones where a change
+// to the Outreach Review "Ready?" decision (or hand-edited agent info)
+// should still be pulled in. Once a row is Contacted or terminal, the
+// reply/follow-up logic owns it and re-reading the sheet must not reopen
+// it.
+const REVIEW_SYNCABLE_STATUSES = ['Information Needed', 'Needs Review', 'Ready for Drafting', 'Pending Approval', 'Approved', 'Do Not Automate'];
+
+/**
+ * Re-reads the human-owned "Outreach Review" tab every cycle and pulls
+ * its current state into the local working rows (the Sheet is
+ * authoritative). This is what makes a human marking "Ready for
+ * Automated Outreach? = Yes" AFTER a lead was auto-queued actually take
+ * effect: addFromFlipScout() only reads that decision once, at add-time,
+ * which in this flow is always before the human has decided.
+ *
+ * Matched by normalized address. For each pre-send row:
+ *  - "Yes"  -> reviewCleared = TRUE, and a block that existed only
+ *              because the lead wasn't cleared yet is lifted. A
+ *              do-not-automate flag set from a REI BlackBook *note* (a
+ *              compliance signal, not a clearance question) is NEVER
+ *              lifted here.
+ *  - anything else (blank / "No" / ...) -> reviewCleared cleared and the
+ *              lead re-blocked with doNotAutomate, unless a stricter
+ *              REI-notes block is already the reason.
+ *  - hand-edited agent name/phone/email on the sheet overwrite the row
+ *    (recomputing the contact/outreach keys if the phone changed).
+ */
+/**
+ * Pure decision function (no I/O) for one working row against its
+ * matching "Outreach Review" record -- extracted so the safety-critical
+ * rules here are unit-testable. Returns the set of fields to change on
+ * the row (empty object = leave the row alone).
+ *
+ * Rules, in order of importance:
+ *  - A do-not-automate flag whose reason is a REI BlackBook *note* is a
+ *    compliance signal and is NEVER lifted here, even on "Yes".
+ *  - "Yes" clears the review-based block and marks reviewCleared.
+ *  - Anything else re-blocks with doNotAutomate (unless a stricter
+ *    REI-notes block is already the reason) and clears reviewCleared.
+ *  - Non-empty agent name/phone/email on the sheet are authoritative and
+ *    overwrite the row.
+ */
+function computeReviewDecisionFields(row, review) {
+  const isCleared = String(review.readyForAutomatedOutreach || '').trim().toLowerCase() === 'yes';
+  const reiNoteBlocked = coerceBoolean(row.doNotAutomate) &&
+    /REI BlackBook note/i.test(row.doNotAutomateReason || '');
+  const fields = {};
+
+  // Sheet-authoritative agent info: a human correcting a phone/email in
+  // Outreach Review wins over whatever the row currently holds.
+  if (review.agentName && review.agentName !== row.agentName) fields.agentName = review.agentName;
+  if (review.agentPhone && review.agentPhone !== row.agentPhone) fields.agentPhone = review.agentPhone;
+  if (review.agentEmail && review.agentEmail !== row.agentEmail) fields.agentEmail = review.agentEmail;
+
+  if (isCleared) {
+    if (coerceBoolean(row.reviewCleared) !== true) fields.reviewCleared = 'TRUE';
+    if (coerceBoolean(row.doNotAutomate) && !reiNoteBlocked) {
+      fields.doNotAutomate = undefined;
+      fields.doNotAutomateReason = undefined;
+    }
+  } else {
+    if (row.reviewCleared) fields.reviewCleared = undefined;
+    if (!reiNoteBlocked) {
+      fields.doNotAutomate = 'TRUE';
+      fields.doNotAutomateReason = review.readyForAutomatedOutreach
+        ? 'Outreach Review sheet: "' + review.readyForAutomatedOutreach + '"'
+        : 'Outreach Review sheet: not yet reviewed';
+    }
+  }
+  return fields;
+}
+
+async function syncOutreachReviewDecisions() {
+  let reviewRows;
+  try {
+    reviewRows = await getOutreachReviewRows();
+  } catch (err) {
+    return { updated: 0, error: err.message };
+  }
+  const rows = store.getQueueRows((r) => REVIEW_SYNCABLE_STATUSES.includes(r.status));
+  let updated = 0;
+
+  for (const row of rows) {
+    const review = findOutreachReviewStatus(row.propertyAddress, reviewRows);
+    if (!review) continue;
+    const fields = computeReviewDecisionFields(row, review);
+    if (Object.keys(fields).length === 0) continue;
+
+    // Recompute contact/outreach keys if the phone changed (same
+    // reasoning as updateRow()); a blank phone leaves them blank.
+    if (fields.agentPhone !== undefined) {
+      fields.contactKey = buildContactKey(fields.agentPhone);
+      fields.outreachKey = buildOutreachKey(fields.agentPhone, row.propertyAddress, row.campaign);
+    }
+    fields.lastUpdated = new Date().toISOString();
+    store.updateQueueRow(row.id, fields);
+    updated++;
+  }
+
+  const sheetSync = await syncOutreachStatusTab();
+  return { updated, sheetSync };
 }
 
 /**
@@ -499,7 +621,13 @@ async function approveOutreach() {
 async function sendApprovedEmails() {
   const sendingEnabled = config.flags.emailSendingEnabled;
   const suppressionList = store.getSuppressionList();
-  const rows = store.getQueueRows((r) => r.status === 'Approved' && r.agentEmail && r.renderedEmailBody);
+  // Also picks up a row already moved to 'Contacted' by the SMS side,
+  // as long as THIS channel hasn't sent yet (!emailSentAt) -- a real
+  // bug found live: both channels used to gate purely on
+  // status === 'Approved', so whichever channel ran first in a cycle
+  // flipped status to 'Contacted' and silently starved the other one.
+  const rows = store.getQueueRows((r) =>
+    (r.status === 'Approved' || r.status === 'Contacted') && r.agentEmail && r.renderedEmailBody && !r.emailSentAt);
 
   const results = [];
   for (const row of rows) {
@@ -526,7 +654,12 @@ async function sendApprovedEmails() {
 
     if (sendingEnabled) {
       await gmailClient.sendEmail({ to: row.agentEmail, subject: row.renderedEmailSubject, body: row.renderedEmailBody });
-      store.updateQueueRow(row.id, { status: 'Contacted', contactedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
+      store.updateQueueRow(row.id, {
+        status: 'Contacted',
+        contactedAt: row.contactedAt || new Date().toISOString(),
+        emailSentAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString()
+      });
       store.appendCommunicationLog({ ...logBase, result: 'Sent', notes: '' });
       results.push({ id: row.id, address: row.propertyAddress, result: 'Sent' });
     } else {
@@ -766,6 +899,36 @@ async function checkReiBlackBookReplies() {
   return results;
 }
 
+/**
+ * Read-only dashboard summary sourced straight from the "Outreach
+ * Review" tab -- the authoritative, human-facing Sheet surface -- so the
+ * app's Dashboard reflects exactly what a person sees in the sheet, not
+ * the local working cache (which can hold older/test rows that were
+ * never part of the current Sheet-driven flow). Buckets leads by their
+ * "Ready for Automated Outreach?" decision.
+ */
+async function getOutreachReviewSummary() {
+  const rows = await getOutreachReviewRows();
+  const summary = {
+    total: rows.length,
+    ready: 0,
+    awaitingReview: 0,
+    notReady: 0,
+    missingPhone: 0,
+    byDecision: {}
+  };
+  rows.forEach((r) => {
+    const decision = String(r.readyForAutomatedOutreach || '').trim();
+    const label = decision === '' ? '(awaiting review)' : decision;
+    summary.byDecision[label] = (summary.byDecision[label] || 0) + 1;
+    if (decision.toLowerCase() === 'yes') summary.ready++;
+    else if (decision === '') summary.awaitingReview++;
+    else summary.notReady++;
+    if (!String(r.agentPhone || '').trim()) summary.missingPhone++;
+  });
+  return summary;
+}
+
 function listRows() {
   return store.getQueueRows().map((r) => ({
     id: r.id,
@@ -784,6 +947,10 @@ module.exports = {
   listFlipScoutLeads,
   addFromFlipScout,
   autoQueueFromFlipScout,
+  syncGoodFlipLeadsToReview,
+  syncOutreachReviewDecisions,
+  computeReviewDecisionFields,
+  getOutreachReviewSummary,
   lookupRedfinAgentContact,
   enrichFromReiBlackBook,
   checkReiBlackBookNotes,

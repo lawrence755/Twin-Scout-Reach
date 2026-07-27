@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('outreachApi', {
   approveOutreach: () => ipcRenderer.invoke('outreach:approve'),
   sendApprovedEmails: () => ipcRenderer.invoke('outreach:send-emails'),
   checkReplies: () => ipcRenderer.invoke('outreach:check-replies'),
+  getOutreachReviewSummary: () => ipcRenderer.invoke('outreach:review-summary'),
   listOutreachRows: () => ipcRenderer.invoke('outreach:list-rows'),
   getOutreachRow: (id) => ipcRenderer.invoke('outreach:get-row', id),
   listFlipScoutLeads: () => ipcRenderer.invoke('outreach:list-flip-scout-leads'),

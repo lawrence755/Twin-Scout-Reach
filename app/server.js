@@ -189,6 +189,17 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  if (req.method === 'GET' && url.pathname === '/outreach/review-summary') {
+    try {
+      const summary = await outreachActions.getOutreachReviewSummary();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, summary }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
   if (req.method === 'GET' && url.pathname === '/outreach/rows') {
     try {
       const rows = await outreachActions.listRows();

@@ -48,7 +48,11 @@ function getSuppressionList() {
 const GOOGLE_VOICE_URL = 'https://voice.google.com/u/0/messages';
 
 function isAutoSmsSendEnabled() {
-  return String(process.env.ENABLE_AUTO_SMS_SEND || '').trim().toLowerCase() === 'true';
+  // config.isLiveEnabled reads the .env FILE fresh, not this spawned
+  // process's inherited (and possibly stale) process.env -- so flipping
+  // the Settings toggle off takes effect on the very next run, no app
+  // restart. See src/config/index.js.
+  return config.isLiveEnabled('ENABLE_AUTO_SMS_SEND');
 }
 
 /**
@@ -56,12 +60,20 @@ function isAutoSmsSendEnabled() {
  * Returns null (with a reason) once both follow-ups have already gone
  * out -- Phase 9's "limit the sequence to two follow-ups," after which
  * outreach stops rather than texting indefinitely.
+ *
+ * Checks !row.smsSentAt (not just status === 'Approved') for the
+ * initial send -- a real bug found live on the REI BlackBook channel,
+ * same code shape here: if email sends first for a row with both
+ * agentEmail and agentPhone, it moves status straight to 'Contacted',
+ * which used to make this silently skip the SMS side entirely
+ * (whichever channel ran first "stole" the shared Approved status).
+ * smsSentAt is this channel's own independent completion marker.
  */
 function pickTemplateForRow(row) {
-  if (row.status === 'Approved') {
+  if (!row.smsSentAt && (row.status === 'Approved' || row.status === 'Contacted')) {
     return { template: initialSmsTemplate, nextFollowupCount: 0 };
   }
-  // row.status === 'Follow-Up Due' from here on.
+  if (row.status !== 'Follow-Up Due') return null;
   const followupCount = Number(row.followupCount || 0);
   if (followupCount >= MAX_FOLLOWUPS) return null; // sequence exhausted
   return followupCount === 0
@@ -70,13 +82,15 @@ function pickTemplateForRow(row) {
 }
 
 async function buildEligibleMessages() {
-  // Must match sendApprovedEmails()/getApprovedSmsRows()'s gate exactly
-  // for the initial send (status === 'Approved') -- a looser filter
-  // there (e.g. "anything not Handed Off") is a real, confirmed bug
-  // that let an unapproved row get a real text sent during testing.
-  // Follow-Up Due rows are the two allowed follow-up sends (see
-  // pickTemplateForRow); nothing else in the flow is widened.
-  const rows = await getOutreachQueueRows((row) => row.agentPhone && (row.status === 'Approved' || row.status === 'Follow-Up Due'));
+  // Must match sendApprovedEmails()'s gate for the initial send --
+  // Approved, or already Contacted via the other channel but not yet
+  // sent on THIS one (!smsSentAt). Still excludes anything not
+  // actually approved (Information Needed, Needs Review, etc.) --
+  // that was the earlier, separate bug ("anything not Handed Off" was
+  // too loose); this is narrower; a row only reaches Contacted after
+  // passing through Approved in the first place.
+  const rows = await getOutreachQueueRows((row) =>
+    row.agentPhone && (row.status === 'Approved' || row.status === 'Follow-Up Due' || (row.status === 'Contacted' && !row.smsSentAt)));
   const suppressionList = await getSuppressionList();
   const allOutreachKeys = rows.map((row) => row.outreachKey);
   const mergeBase = {
@@ -227,12 +241,20 @@ async function main() {
 
   for (const item of ready) {
     const outcome = await sendOne(page, item);
-    await updateOutreachQueueRow(item.row.id, {
-      status: outcome.result === 'Sent' ? 'Contacted' : 'Needs Review',
-      contactedAt: outcome.result === 'Sent' ? new Date().toISOString() : undefined,
-      followupCount: outcome.result === 'Sent' ? item.nextFollowupCount : undefined,
-      qualificationReasons: outcome.notes
-    });
+    // Built conditionally, not with every key always present -- an
+    // explicit `undefined` spread into a stored row erases whatever
+    // was already there for that field (e.g. wiping out a contactedAt
+    // the email side had already set), even on a failed attempt.
+    const updateFields = { qualificationReasons: outcome.notes };
+    if (outcome.result === 'Sent') {
+      updateFields.status = 'Contacted';
+      updateFields.contactedAt = item.row.contactedAt || new Date().toISOString();
+      updateFields.smsSentAt = new Date().toISOString();
+      updateFields.followupCount = item.nextFollowupCount;
+    } else {
+      updateFields.status = 'Needs Review';
+    }
+    await updateOutreachQueueRow(item.row.id, updateFields);
     await appendAutoOutreachLog({
       timestamp: new Date().toISOString(),
       outreachKey: item.outreachKey,

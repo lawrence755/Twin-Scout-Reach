@@ -51,7 +51,11 @@ function getSuppressionList() {
 }
 
 function isReiSmsSendEnabled() {
-  return String(process.env.ENABLE_REI_SMS_SEND || '').trim().toLowerCase() === 'true';
+  // config.isLiveEnabled reads the .env FILE fresh, not this spawned
+  // process's inherited (and possibly stale) process.env -- so flipping
+  // the Settings toggle off takes effect on the very next run, no app
+  // restart. See src/config/index.js.
+  return config.isLiveEnabled('ENABLE_REI_SMS_SEND');
 }
 
 function coerceBoolean(value) {
@@ -61,11 +65,22 @@ function coerceBoolean(value) {
   return undefined;
 }
 
-/** Same sequencing as the Google Voice path -- see its own comment for the table. */
+/**
+ * Same sequencing as the Google Voice path -- see its own comment for
+ * the table. Checks !row.smsSentAt (not just status === 'Approved')
+ * for the initial send -- a real bug found live: if email sends
+ * first for a row with both agentEmail and agentPhone, it moves
+ * status straight to 'Contacted', which used to make this function
+ * silently skip the SMS side entirely (whichever channel ran first
+ * "stole" the shared Approved status). smsSentAt is this channel's
+ * own independent completion marker, so it no longer depends on the
+ * other channel not having already advanced status.
+ */
 function pickTemplateForRow(row) {
-  if (row.status === 'Approved') {
+  if (!row.smsSentAt && (row.status === 'Approved' || row.status === 'Contacted')) {
     return { template: initialSmsTemplate, nextFollowupCount: 0 };
   }
+  if (row.status !== 'Follow-Up Due') return null;
   const followupCount = Number(row.followupCount || 0);
   if (followupCount >= MAX_FOLLOWUPS) return null;
   return followupCount === 0
@@ -75,7 +90,8 @@ function pickTemplateForRow(row) {
 
 async function buildEligibleMessages() {
   const rows = await getOutreachQueueRows((row) =>
-    row.agentPhone && row.reiContactLink && (row.status === 'Approved' || row.status === 'Follow-Up Due'));
+    row.agentPhone && row.reiContactLink &&
+    (row.status === 'Approved' || row.status === 'Follow-Up Due' || (row.status === 'Contacted' && !row.smsSentAt)));
   const suppressionList = await getSuppressionList();
   const allOutreachKeys = rows.map((row) => row.outreachKey);
   const mergeBase = {
@@ -175,12 +191,21 @@ async function main() {
     } catch (err) {
       outcome = { result: 'Needs Review', notes: err.message };
     }
-    await updateOutreachQueueRow(item.row.id, {
-      status: outcome.result === 'Sent' ? 'Contacted' : 'Needs Review',
-      contactedAt: outcome.result === 'Sent' ? new Date().toISOString() : undefined,
-      followupCount: outcome.result === 'Sent' ? item.nextFollowupCount : undefined,
-      qualificationReasons: outcome.notes
-    });
+    // Built conditionally rather than always including every key --
+    // spreading an explicit `undefined` into a stored row (the old
+    // code always did, even on failure) erases whatever was already
+    // there for that field, e.g. wiping out a contactedAt the email
+    // side had already set.
+    const updateFields = { qualificationReasons: outcome.notes };
+    if (outcome.result === 'Sent') {
+      updateFields.status = 'Contacted';
+      updateFields.contactedAt = item.row.contactedAt || new Date().toISOString();
+      updateFields.smsSentAt = new Date().toISOString();
+      updateFields.followupCount = item.nextFollowupCount;
+    } else {
+      updateFields.status = 'Needs Review';
+    }
+    await updateOutreachQueueRow(item.row.id, updateFields);
     await appendAutoOutreachLog({
       timestamp: new Date().toISOString(),
       outreachKey: item.outreachKey,

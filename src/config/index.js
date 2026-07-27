@@ -6,6 +6,7 @@
  * treated as "on".
  */
 const path = require('path');
+const fs = require('fs');
 
 // Anchor to this file's own location (src/config -> repo root, or
 // resources/app in the packaged Electron app), never to process.cwd().
@@ -19,9 +20,34 @@ const path = require('path');
 // launched.
 const ROOT = path.resolve(__dirname, '..', '..');
 
-require('dotenv').config({ path: path.join(ROOT, '.env') });
+const ENV_PATH = path.join(ROOT, '.env');
 
-function isEnabled(envVar) {
+require('dotenv').config({ path: ENV_PATH });
+
+// Live read of a boolean live-sending flag straight from the .env file
+// on disk, EVERY call -- deliberately not from process.env. process.env
+// is frozen when a process starts: for the always-running app that's app
+// startup, and for a spawned job (app/jobRunner.js) it's a copy of the
+// parent app's environment, which the child's own dotenv will NOT
+// override (dotenv leaves already-set vars alone). Both cases meant a
+// Settings toggle flipped off kept sending until a full app restart.
+// Reading the file each time makes every ENABLE_* switch an immediate,
+// reliable kill switch. Falls back to process.env only if the file read
+// fails, so a guard can never throw here.
+function isLiveEnabled(envVar, envPath = ENV_PATH) {
+  try {
+    const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+    let value;
+    for (const line of lines) {
+      const m = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$/);
+      if (m && m[1] === envVar) value = m[2];
+    }
+    if (value !== undefined) {
+      return value.trim().replace(/^['"]|['"]$/g, '').toLowerCase() === 'true';
+    }
+  } catch (err) {
+    // fall through to process.env
+  }
   return String(process.env[envVar] || '').trim().toLowerCase() === 'true';
 }
 
@@ -35,10 +61,16 @@ function resolvePath(envValue, defaultRelativePath) {
 }
 
 const config = {
-  flags: {
-    emailSendingEnabled: isEnabled('ENABLE_EMAIL_SENDING'),
-    voiceAutomationEnabled: isEnabled('ENABLE_VOICE_AUTOMATION')
+  // Live getter: reads the .env file fresh on every access (see
+  // isLiveEnabled) so config.flags is never a stale snapshot from
+  // process startup.
+  get flags() {
+    return {
+      emailSendingEnabled: isLiveEnabled('ENABLE_EMAIL_SENDING'),
+      voiceAutomationEnabled: isLiveEnabled('ENABLE_VOICE_AUTOMATION')
+    };
   },
+  isLiveEnabled,
   sheets: {
     sheetId: process.env.GOOGLE_SHEET_ID || '',
     credentialsPath: resolvePath(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'service-account.json')

@@ -36,6 +36,7 @@
       approveOutreach: () => fetch('/outreach/approve', { method: 'POST' }).then((r) => r.json()),
       sendApprovedEmails: () => fetch('/outreach/send-emails', { method: 'POST' }).then((r) => r.json()),
       checkReplies: () => fetch('/outreach/check-replies', { method: 'POST' }).then((r) => r.json()),
+      getOutreachReviewSummary: () => fetch('/outreach/review-summary').then((r) => r.json()),
       listOutreachRows: () => fetch('/outreach/rows').then((r) => r.json()),
       getOutreachRow: (id) => fetch('/outreach/row/' + encodeURIComponent(id)).then((r) => r.json()),
       updateOutreachRow: (id, fields) =>
@@ -137,6 +138,8 @@
   inputBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitInput(); });
 
   document.getElementById('open-sheet-btn').addEventListener('click', () => api.openSheet());
+  const openSheetBtn2 = document.getElementById('open-sheet-btn-2');
+  if (openSheetBtn2) openSheetBtn2.addEventListener('click', () => api.openSheet());
 
   api.onLog((payload) => appendLog(payload.stream, payload.text.replace(/\n$/, '')));
   api.onJobStarted((payload) => {
@@ -260,175 +263,54 @@
     });
   });
 
-  // --- Outreach Queue: add-row form, workflow buttons, rows table ---
-  const CHECKBOX_FIELDS = ['tenantOccupied', 'needsWork', 'appearsRenovated', 'compReviewCompleted'];
-  const addRowForm = document.getElementById('add-row-form');
-  const cancelEditBtn = document.getElementById('cancel-edit-btn');
-
+  // --- Dashboard: read-only monitor of the working rows ---
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  const STATUS_CLASS = {
-    'Information Needed': 'status-neutral',
-    'Ready for Drafting': 'status-info',
-    'Pending Approval': 'status-info',
-    'Needs Review': 'status-warn',
-    'Approved': 'status-info',
-    'Contacted': 'status-warn',
-    'Follow-Up Due': 'status-warn',
-    'Replied': 'status-info',
-    'Handed Off': 'status-good',
-    'Opted Out': 'status-bad',
-    'Rejected': 'status-bad',
-    'Not Interested': 'status-bad',
-    'Do Not Automate': 'status-bad',
-    'Duplicate': 'status-neutral',
-    'Failed Contact': 'status-bad'
-  };
-  function statusBadge(status) {
-    if (!status) return '';
-    return `<span class="status-badge ${STATUS_CLASS[status] || 'status-neutral'}">${escapeHtml(status)}</span>`;
+  function decisionClass(label) {
+    const l = String(label).toLowerCase();
+    if (l === 'yes') return 'status-good';
+    if (l.startsWith('no')) return 'status-bad';
+    if (l.includes('awaiting')) return 'status-warn';
+    return 'status-neutral';
+  }
+  function decisionBadge(label) {
+    return `<span class="status-badge ${decisionClass(label)}">${escapeHtml(label)}</span>`;
   }
 
-  const NEEDS_ACTION_STATUSES = ['Information Needed', 'Ready for Drafting', 'Pending Approval', 'Needs Review'];
-  const IN_PROGRESS_STATUSES = ['Approved', 'Contacted', 'Follow-Up Due', 'Replied'];
-  const CLOSED_OUT_STATUSES = ['Opted Out', 'Rejected', 'Not Interested', 'Do Not Automate', 'Duplicate', 'Failed Contact'];
-
-  function renderDashboard(rows) {
-    const counts = { total: rows.length, needsAction: 0, inProgress: 0, handedOff: 0, closedOut: 0 };
-    const byStatus = {};
-    rows.forEach((r) => {
-      byStatus[r.status] = (byStatus[r.status] || 0) + 1;
-      if (NEEDS_ACTION_STATUSES.includes(r.status)) counts.needsAction++;
-      else if (IN_PROGRESS_STATUSES.includes(r.status)) counts.inProgress++;
-      else if (r.status === 'Handed Off') counts.handedOff++;
-      else if (CLOSED_OUT_STATUSES.includes(r.status)) counts.closedOut++;
-    });
+  function renderDashboard(summary) {
+    const counts = {
+      total: summary.total || 0,
+      awaitingReview: summary.awaitingReview || 0,
+      ready: summary.ready || 0,
+      notReady: summary.notReady || 0,
+      missingPhone: summary.missingPhone || 0
+    };
     Object.keys(counts).forEach((key) => {
       const card = document.querySelector(`.stat-card[data-stat="${key}"] .stat-value`);
       if (card) card.textContent = counts[key];
     });
     const breakdown = document.getElementById('status-breakdown');
-    breakdown.innerHTML = Object.entries(byStatus)
-      .sort((a, b) => b[1] - a[1])
-      .map(([status, count]) => `<span class="status-chip">${statusBadge(status)}<span class="count">${count}</span></span>`)
-      .join('') || '<span class="muted-tag">No rows yet.</span>';
+    const entries = Object.entries(summary.byDecision || {});
+    breakdown.innerHTML = entries.length
+      ? entries.sort((a, b) => b[1] - a[1])
+          .map(([label, count]) => `<span class="status-chip">${decisionBadge(label)}<span class="count">${count}</span></span>`)
+          .join('')
+      : '<span class="muted-tag">No leads in the Outreach Review tab yet.</span>';
   }
-  document.getElementById('refresh-dashboard-btn').addEventListener('click', refreshOutreachTable);
+  document.getElementById('refresh-dashboard-btn').addEventListener('click', refreshDashboard);
 
-  async function refreshOutreachTable() {
-    const result = await api.listOutreachRows();
+  async function refreshDashboard() {
+    const result = await api.getOutreachReviewSummary();
     if (result.ok === false) {
-      appendLog('system', 'Could not load Outreach Queue rows: ' + result.error);
+      appendLog('system', 'Could not load the Outreach Review summary: ' + result.error);
       return;
     }
-    const rows = result.rows || [];
-    renderDashboard(rows);
-    const tbody = document.querySelector('#outreach-table tbody');
-    tbody.innerHTML = '';
-    rows.forEach((r, i) => {
-      const tr = document.createElement('tr');
-      tr.dataset.id = r.id;
-      tr.title = 'Click to edit this row';
-      tr.innerHTML = `<td>${i + 1}</td><td>${escapeHtml(r.address)}</td><td>${statusBadge(r.status)}</td><td>${escapeHtml(r.agentPhone)}</td><td>${escapeHtml(r.agentEmail)}</td>`;
-      tr.addEventListener('click', () => loadRowIntoForm(r.id));
-      tbody.appendChild(tr);
-    });
+    renderDashboard(result.summary || { total: 0, byDecision: {} });
   }
 
-  async function loadRowIntoForm(id) {
-    const result = await api.getOutreachRow(id);
-    if (result.ok === false || !result.row) {
-      appendLog('system', 'Could not load row: ' + (result.error || 'not found'));
-      return;
-    }
-    const row = result.row;
-    addRowForm.elements.editingId.value = id;
-    ['propertyAddress', 'city', 'agentName', 'agentPhone', 'agentEmail', 'listingStatus', 'daysOnMarket', 'campaign'].forEach((key) => {
-      if (addRowForm.elements[key]) addRowForm.elements[key].value = row[key] || '';
-    });
-    CHECKBOX_FIELDS.forEach((key) => {
-      if (addRowForm.elements[key]) addRowForm.elements[key].checked = String(row[key]).toUpperCase() === 'TRUE';
-    });
-    document.getElementById('add-row-btn').textContent = 'Save changes';
-    cancelEditBtn.style.display = '';
-    appendLog('system', 'Editing row: ' + row.propertyAddress);
-  }
-
-  function resetForm() {
-    addRowForm.reset();
-    addRowForm.elements.editingId.value = '';
-    document.getElementById('add-row-btn').textContent = 'Add Row';
-    cancelEditBtn.style.display = 'none';
-  }
-  cancelEditBtn.addEventListener('click', resetForm);
-
-  addRowForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    const fields = {};
-    new FormData(form).forEach((value, key) => { if (key !== 'editingId') fields[key] = value; });
-    CHECKBOX_FIELDS.forEach((key) => { fields[key] = form.elements[key].checked ? 'TRUE' : 'FALSE'; });
-
-    const editingId = form.elements.editingId.value;
-    const result = editingId ? await api.updateOutreachRow(editingId, fields) : await api.addOutreachRow(fields);
-    if (result.ok === false) {
-      appendLog('system', (editingId ? 'Update' : 'Add') + ' row failed: ' + result.error);
-    } else {
-      appendLog('system', (editingId ? 'Updated' : 'Added') + ' row for ' + fields.propertyAddress);
-      resetForm();
-      refreshOutreachTable();
-    }
-  });
-
-  function wireOutreachAction(buttonId, apiCall, label) {
-    document.getElementById(buttonId).addEventListener('click', async () => {
-      const result = await apiCall();
-      if (result.ok === false) {
-        appendLog('system', label + ' failed: ' + result.error);
-        return;
-      }
-      appendLog('system', label + ': ' + result.results.length + ' row(s) affected.');
-      result.results.forEach((r) => {
-        const detail = r.reasons ? r.reasons.join(' ') : (r.problems || []).join(' ');
-        appendLog('system', '  ' + r.address + ' -> ' + (r.status || 'Approved') + (detail ? ' -- ' + detail : ''));
-      });
-      refreshOutreachTable();
-    });
-  }
-  wireOutreachAction('refresh-validation-btn', api.refreshValidation, 'Refresh validation');
-  wireOutreachAction('submit-approval-btn', api.submitForApproval, 'Submit for approval');
-  wireOutreachAction('approve-btn', api.approveOutreach, 'Approve outreach');
-
-  document.getElementById('send-emails-btn').addEventListener('click', async () => {
-    const result = await api.sendApprovedEmails();
-    if (result.ok === false) {
-      appendLog('system', 'Send approved emails failed: ' + result.error);
-      return;
-    }
-    appendLog('system', 'Send approved emails (sending ' + (result.sendingEnabled ? 'ON' : 'OFF, dry run') + '): ' + result.results.length + ' row(s).');
-    result.results.forEach((r) => {
-      appendLog('system', '  ' + r.address + ' -> ' + r.result + (r.notes ? ' -- ' + r.notes : ''));
-    });
-    refreshOutreachTable();
-  });
-
-  document.getElementById('check-replies-btn').addEventListener('click', async () => {
-    const result = await api.checkReplies();
-    if (result.ok === false) {
-      appendLog('system', 'Check for replies failed: ' + result.error);
-      return;
-    }
-    appendLog('system', 'Check for replies: ' + result.results.length + ' row(s) checked.');
-    result.results.forEach((r) => {
-      appendLog('system', '  ' + r.address + ' -> ' + r.result + (r.replyText ? ' -- reply: "' + r.replyText + '"' : ''));
-      if (r.notifyError) appendLog('system', '    Google Chat notification failed: ' + r.notifyError);
-    });
-    refreshOutreachTable();
-  });
-
-  refreshOutreachTable();
+  refreshDashboard();
 
   // --- Flip Scout Leads: browse + select rows to pull into the queue ---
   const FLIP_QUALITY_CLASS = {
@@ -453,7 +335,7 @@
     leads.forEach((l) => {
       const tr = document.createElement('tr');
       const linkCell = l.redfinLink ? `<a href="${escapeHtml(l.redfinLink)}" target="_blank" rel="noopener">link</a>` : '';
-      tr.innerHTML = `<td><input type="checkbox" data-sheet-row="${l.sheetRow}" /></td><td>${escapeHtml(l.score)}</td><td>${escapeHtml(l.recommendation)}</td><td>${flipQualityBadge(l.flipQuality)}</td><td>${escapeHtml(l.address)}</td><td>${escapeHtml(l.city)}</td><td>${escapeHtml(l.arv)}</td><td>${escapeHtml(l.grossProfitLight)}</td><td>${linkCell}</td>`;
+      tr.innerHTML = `<td>${escapeHtml(l.score)}</td><td>${escapeHtml(l.recommendation)}</td><td>${flipQualityBadge(l.flipQuality)}</td><td>${escapeHtml(l.address)}</td><td>${escapeHtml(l.city)}</td><td>${escapeHtml(l.arv)}</td><td>${escapeHtml(l.grossProfitLight)}</td><td>${linkCell}</td>`;
       tbody.appendChild(tr);
     });
     appendLog('system', 'Showing ' + leads.length + ' of ' + allFlipScoutLeads.length + ' Flip Scout lead(s)' + (goodOnly ? ' (Good Flip only).' : '.'));
@@ -471,33 +353,4 @@
 
   document.getElementById('load-flip-scout-btn').addEventListener('click', refreshFlipScoutTable);
   document.getElementById('good-flip-only-filter').addEventListener('change', renderFlipScoutRows);
-
-  document.getElementById('select-all-good-flip-btn').addEventListener('click', () => {
-    const boxes = Array.from(document.querySelectorAll('#flip-scout-table input[type="checkbox"]'));
-    let count = 0;
-    boxes.forEach((cb) => {
-      const lead = allFlipScoutLeads.find((l) => String(l.sheetRow) === cb.dataset.sheetRow);
-      const isGood = lead && lead.isGoodFlip;
-      cb.checked = isGood;
-      if (isGood) count++;
-    });
-    appendLog('system', 'Selected ' + count + ' Good Flip lead(s).');
-  });
-
-  document.getElementById('add-selected-flip-scout-btn').addEventListener('click', async () => {
-    const checked = Array.from(document.querySelectorAll('#flip-scout-table input[type="checkbox"]:checked'));
-    const sheetRows = checked.map((cb) => Number(cb.dataset.sheetRow));
-    if (sheetRows.length === 0) {
-      appendLog('system', 'Select at least one Flip Scout lead first.');
-      return;
-    }
-    const campaign = document.getElementById('flip-scout-campaign').value || 'flip-scout';
-    const result = await api.addFromFlipScout(sheetRows, campaign);
-    if (result.ok === false) {
-      appendLog('system', 'Add from Flip Scout failed: ' + result.error);
-      return;
-    }
-    appendLog('system', 'Added ' + result.added + ' row(s) to Outreach Queue. Skipped ' + result.skipped.length + ' duplicate(s).');
-    refreshOutreachTable();
-  });
 })();
