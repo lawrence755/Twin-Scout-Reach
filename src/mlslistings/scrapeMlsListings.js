@@ -97,66 +97,72 @@ function extractAgentContact(pageText, opts = {}) {
   };
 }
 
-// --- Navigation (needs live-page verification) ------------------------
+// --- Navigation -------------------------------------------------------
+// Wired from a live recording of the real Pro Dashboard flow: search is
+// the Matrix system, opened from the dashboard's "Matrix Search" quick
+// action, which pops open a SEPARATE window with a "Enter Shorthand or
+// MLS#" speed bar. The speed-bar address search + how a result renders
+// still want one confirming live run (marked TODO(verify)), but this is
+// no longer a placeholder -- it drives the real UI.
 
 /**
- * Searches Pro Dashboard for a listing by street address and opens its
- * detail page. TODO(selectors): fill in the real steps once the logged-in
- * UI is inspected -- search box selector, results-list selector, and how
- * to open the first matching result. Returns true if a detail page was
- * opened, false if nothing matched.
+ * From the dashboard, opens the Matrix Search popup and returns that page.
+ * Falls back to the same tab if Matrix opens inline instead of a popup.
  */
-async function openListingByAddress(page, address) {
-  await page.goto(config.mls.dashboardUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+async function openMatrixSearch(page) {
+  await page.goto(config.mls.dashboardUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(2500);
-
-  const pageText = await page.innerText('body').catch(() => '');
-  if (looksLoggedOut(pageText)) {
+  const dashText = await page.innerText('body').catch(() => '');
+  if (looksLoggedOut(dashText)) {
     throw new Error('Not logged into MLSListings -- run `npm run mlslistings:login`, log in, then retry.');
   }
 
-  // TODO(selectors): the three steps below are placeholders. Replace the
-  // selectors with the real ones after inspecting the logged-in pages.
-  //
-  //   const SEARCH_INPUT = 'input[placeholder="Search"]';   // TODO
-  //   const RESULT_ROW   = '.search-results .result-row';    // TODO
-  //
-  //   await page.fill(SEARCH_INPUT, address);
-  //   await page.keyboard.press('Enter');
-  //   await page.waitForTimeout(3000);
-  //   const first = page.locator(RESULT_ROW).first();
-  //   if (await first.count() === 0) return false;
-  //   await first.click();
-  //   await page.waitForTimeout(3000);
-  //   return true;
-
-  throw new Error(
-    'openListingByAddress is not wired to the live MLSListings UI yet -- ' +
-    'fill in the TODO(selectors) search/result steps for "' + address + '".'
-  );
+  const popupPromise = page.context().waitForEvent('page', { timeout: 20000 }).catch(() => null);
+  await page.getByRole('link', { name: /Matrix Search/i }).first().click();
+  const popup = (await popupPromise) || page;
+  await popup.waitForLoadState('domcontentloaded').catch(() => {});
+  await popup.waitForTimeout(3000);
+  return popup;
 }
 
 /**
- * Full per-lead flow: search by address, open the listing, read the agent
- * contact off the detail page. Uses one already-open, already-logged-in
- * page reused across a batch (same as the REI BlackBook scraper).
+ * Full per-lead flow: open Matrix, search the address in the speed bar,
+ * read the listing agent's contact off whatever the search lands on.
+ * Opens (and closes) a fresh Matrix popup per lead so a batch can't leak
+ * windows. Returns { found, agentName, agentPhone, agentEmail } -- found
+ * is false (not thrown) when nothing usable was parsed, so one bad lead
+ * never aborts the batch.
+ *
+ * TODO(verify): confirm on a live run whether the speed bar takes a street
+ * address directly and whether results land on a display page (agent
+ * contact visible) or a list that needs the first row opened first.
  */
 async function scrapeListingAgent(page, address) {
-  const opened = await openListingByAddress(page, address);
-  if (!opened) {
-    return { found: false, agentName: '', agentPhone: '', agentEmail: '' };
+  const popup = await openMatrixSearch(page);
+  try {
+    const box = popup.getByRole('textbox', { name: /Enter Shorthand or MLS/i }).first();
+    await box.waitFor({ state: 'visible', timeout: 15000 });
+    await box.click();
+    await box.fill(String(address).trim());
+    await popup.keyboard.press('Enter');
+    await popup.waitForTimeout(4500);
+
+    let detailText = await popup.innerText('body').catch(() => '');
+    if (looksLoggedOut(detailText)) {
+      throw new Error('Not logged into MLSListings -- run `npm run mlslistings:login`, log in, then retry.');
+    }
+
+    const contact = extractAgentContact(detailText);
+    const found = !!(contact.agentPhone || contact.agentEmail || contact.agentName);
+    return { found, ...contact };
+  } finally {
+    if (popup !== page) await popup.close().catch(() => {});
   }
-  await page.waitForTimeout(1500);
-  const detailText = await page.innerText('body').catch(() => '');
-  if (looksLoggedOut(detailText)) {
-    throw new Error('Not logged into MLSListings -- run `npm run mlslistings:login`, log in, then retry.');
-  }
-  return { found: true, ...extractAgentContact(detailText) };
 }
 
 module.exports = {
   scrapeListingAgent,
-  openListingByAddress,
+  openMatrixSearch,
   extractAgentContact,
   looksLoggedOut,
   AGENT_LABELS,

@@ -20,20 +20,41 @@ const { MLS_PROFILE_DIR } = require('../src/mlslistings/scrapeMlsListings');
 
 const WAIT_MS = Number(process.env.MLS_LOGIN_WAIT_MS || 5 * 60 * 1000);
 
-async function tryPrefill(page) {
-  if (!config.mls.username || !config.mls.password) return;
-  // TODO(selectors): confirm these against the real MLSListings sign-in
-  // page. Wrapped in try/catch so a mismatch never blocks manual login.
-  const USERNAME_INPUT = 'input[name="username"], input[type="email"], #username';
-  const PASSWORD_INPUT = 'input[name="password"], input[type="password"], #password';
+/**
+ * Best-effort automatic sign-in against MLSListings' Azure B2C login,
+ * using the selectors captured from a live recording of the real flow:
+ * Username / Password / "Sign in", then MLSListings' concurrent-session
+ * gate ("End Oldest Inactive Session"). Reads credentials fresh from
+ * .env (never hard-coded, never logged). If anything doesn't match (or an
+ * MFA/CAPTCHA appears), it just hands control back and you finish by hand.
+ */
+async function autoLogin(page) {
+  const user = config.liveEnvValue('MLS_USERNAME');
+  const pass = config.liveEnvValue('MLS_PASSWORD');
+  if (!user || !pass) {
+    console.log('No MLS_USERNAME / MLS_PASSWORD in .env -- log in by hand in the window.');
+    return;
+  }
   try {
-    const user = page.locator(USERNAME_INPUT).first();
-    const pass = page.locator(PASSWORD_INPUT).first();
-    if (await user.count()) await user.fill(config.mls.username);
-    if (await pass.count()) await pass.fill(config.mls.password);
-    console.log('Pre-filled username/password (from .env). Finish signing in (submit / MFA) in the window.');
+    const username = page.getByRole('textbox', { name: /Username/i }).first();
+    await username.waitFor({ state: 'visible', timeout: 20000 });
+    await username.fill(user);
+    await page.getByRole('textbox', { name: /Password/i }).first().fill(pass);
+    await page.getByRole('button', { name: /^Sign in$/i }).first().click();
+    console.log('Submitted login as ' + user + ' ...');
+    await page.waitForTimeout(6000);
+
+    // MLSListings caps concurrent sessions -- a "session limit" page can
+    // appear after sign-in; ending the oldest one lets us through.
+    const endBtn = page.getByRole('button', { name: /End Oldest Inactive Session/i }).first();
+    if (await endBtn.count()) {
+      await endBtn.click();
+      console.log('Cleared an existing session (End Oldest Inactive Session).');
+      await page.waitForTimeout(5000);
+    }
+    console.log('If you are on the dashboard now, you are logged in. If an MFA/other step shows, finish it in the window.');
   } catch (err) {
-    console.log('Auto-fill selectors did not match -- just log in by hand in the window. (' + err.message + ')');
+    console.log('Auto-login step did not complete (' + err.message + ') -- finish logging in by hand in the window.');
   }
 }
 
@@ -41,10 +62,10 @@ async function main() {
   const context = await chromium.launchPersistentContext(MLS_PROFILE_DIR, { headless: false });
   const page = context.pages()[0] || (await context.newPage());
   await page.goto(config.mls.dashboardUrl, { waitUntil: 'domcontentloaded' });
-  console.log('Browser open -- log into MLSListings in the window that just appeared:');
+  console.log('Browser open -- MLSListings:');
   console.log('  ' + config.mls.dashboardUrl);
-  await tryPrefill(page);
-  console.log('Waiting up to ' + Math.round(WAIT_MS / 1000) + 's before closing...');
+  await autoLogin(page);
+  console.log('Waiting up to ' + Math.round(WAIT_MS / 1000) + 's before closing (leave it while you confirm you are in)...');
   await page.waitForTimeout(WAIT_MS);
   console.log('Closing. Login session (if any) is saved in ' + MLS_PROFILE_DIR + ' for reuse.');
   await context.close();

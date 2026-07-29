@@ -12,6 +12,7 @@
     "email:send-pipeline": "node scripts/send-pipeline-email.js",
     "mlslistings:login": "node scripts/login-mlslistings.js",
     "mlslistings:enrich": "node scripts/enrich-mlslistings.js",
+    "mlslistings:test": "node scripts/mlslistings-test-address.js",
     "enrichment": "node enrichment/index.js",
     "reiblackbook:login": "node scripts/login-reiblackbook.js",
     "reiblackbook:enrich": "node scripts/enrich-reiblackbook.js",
