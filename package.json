@@ -14,6 +14,7 @@
     "mlslistings:enrich": "node scripts/enrich-mlslistings.js",
     "mlslistings:test": "node scripts/mlslistings-test-address.js",
     "enrichment": "node enrichment/index.js",
+    "enrichment:assisted": "node enrichment/assisted.js",
     "reiblackbook:login": "node scripts/login-reiblackbook.js",
     "reiblackbook:enrich": "node scripts/enrich-reiblackbook.js",
     "reiblackbook:check-notes": "node scripts/check-reiblackbook-notes.js",

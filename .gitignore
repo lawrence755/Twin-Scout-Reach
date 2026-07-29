@@ -13,6 +13,7 @@ gmail-token-*.json
 .redfin-profile/
 .reiblackbook-profile/
 .mlslistings-profile/
+enrichment/captures/
 dist/
 data/*.json
 playwright-report/
