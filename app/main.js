@@ -9,6 +9,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const { JobRunner } = require('./jobRunner');
 const { AutomationLoop } = require('./automationLoop');
 const outreachActions = require('../src/outreach/actions');
+const appConfig = require('../src/config');
 const envSettings = require('./envSettings');
 
 const runner = new JobRunner();
@@ -226,7 +227,10 @@ ipcMain.handle('outreach:get-row', async (_event, id) => {
   }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  console.log(appConfig.startupReport());
+  createWindow();
+});
 app.on('window-all-closed', () => {
   automationLoop.stop();
   app.quit();

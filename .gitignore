@@ -16,6 +16,9 @@ gmail-token-*.json
 enrichment/captures/
 dist/
 data/*.json
+data/_backup_*/
+*storageState*.json
+*.session
 playwright-report/
 test-results/
 *.log

@@ -99,6 +99,10 @@ const config = {
   // and are never required. Never commit real values -- .env only.
   mls: {
     dashboardUrl: process.env.MLS_DASHBOARD_URL || 'https://prodashboard.mlslistings.com/',
+    // The Matrix search app itself -- once logged in we can go straight
+    // here to search by address, skipping the dashboard "Matrix Search"
+    // popup handoff.
+    searchUrl: process.env.MLS_SEARCH_URL || 'https://search.mlslistings.com/Matrix/Default.aspx',
     username: process.env.MLS_USERNAME || '',
     password: process.env.MLS_PASSWORD || '',
     scrapeDelayMs: Number(process.env.MLS_SCRAPE_DELAY_MS || 5000)
@@ -130,5 +134,57 @@ const config = {
     googleChatWebhookUrl: process.env.GOOGLE_CHAT_WEBHOOK_URL || ''
   }
 };
+
+/**
+ * A startup summary of which integrations are configured and the live
+ * kill-switch state -- for the app to print at boot (requirement: "display
+ * its active environment and integration states at startup"). Reports
+ * presence/state only; NEVER the secret values themselves.
+ */
+function describeEnvironment() {
+  const present = (v) => (v ? 'set' : 'MISSING');
+  return {
+    googleSheetId: present(config.sheets.sheetId),
+    serviceAccount: present(process.env.GOOGLE_APPLICATION_CREDENTIALS || 'service-account.json'),
+    senderEmail: config.sender.email || 'MISSING',
+    reiBlackBookProfile: '.reiblackbook-profile (login on demand)',
+    mlsAccount: config.mls.username ? 'auto-login configured' : 'manual login',
+    flipScoutFeed: config.feed.flipScoutUrl ? 'set' : 'not set',
+    googleChatWebhook: present(config.notifications.googleChatWebhookUrl),
+    zapierWebhook: present(config.zapier.blackbookWebhookUrl),
+    killSwitches: {
+      ENABLE_EMAIL_SENDING: isLiveEnabled('ENABLE_EMAIL_SENDING'),
+      ENABLE_AUTO_SMS_SEND: isLiveEnabled('ENABLE_AUTO_SMS_SEND'),
+      ENABLE_REI_SMS_SEND: isLiveEnabled('ENABLE_REI_SMS_SEND'),
+      ENABLE_VOICE_AUTOMATION: isLiveEnabled('ENABLE_VOICE_AUTOMATION')
+    }
+  };
+}
+
+/** Human-readable multi-line version of describeEnvironment() for logs. */
+function startupReport() {
+  const e = describeEnvironment();
+  const anySend = Object.values(e.killSwitches).some(Boolean);
+  return [
+    '=== Outreach Control Panel -- environment ===',
+    '  Google Sheet:        ' + e.googleSheetId,
+    '  Service account:     ' + e.serviceAccount,
+    '  Sender email:        ' + e.senderEmail,
+    '  Flip Scout feed:     ' + e.flipScoutFeed,
+    '  MLSListings:         ' + e.mlsAccount,
+    '  Google Chat webhook: ' + e.googleChatWebhook,
+    '  Zapier webhook:      ' + e.zapierWebhook,
+    '  Kill switches (live from .env):',
+    '    ENABLE_EMAIL_SENDING=' + e.killSwitches.ENABLE_EMAIL_SENDING,
+    '    ENABLE_AUTO_SMS_SEND=' + e.killSwitches.ENABLE_AUTO_SMS_SEND,
+    '    ENABLE_REI_SMS_SEND=' + e.killSwitches.ENABLE_REI_SMS_SEND,
+    '    ENABLE_VOICE_AUTOMATION=' + e.killSwitches.ENABLE_VOICE_AUTOMATION,
+    '  SENDING IS ' + (anySend ? 'ENABLED on at least one channel' : 'FULLY OFF (kill switch engaged)'),
+    '============================================='
+  ].join('\n');
+}
+
+config.describeEnvironment = describeEnvironment;
+config.startupReport = startupReport;
 
 module.exports = config;

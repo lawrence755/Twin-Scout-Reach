@@ -165,48 +165,37 @@ class AutomationLoop extends EventEmitter {
   async _runCycle() {
     this.cycleCount++;
 
-    await this._runStep('Transfer Good Flip leads to Outreach Review', async () => {
+    // Good Flip is the ONLY trigger now -- no "Ready for Automated Outreach?"
+    // gate. The transfer step still mirrors Good Flip leads into the Outreach
+    // Review tab purely for visibility.
+    await this._runStep('Transfer Good Flip leads to Outreach Review (visibility)', async () => {
       const { added } = await outreachActions.syncGoodFlipLeadsToReview();
-      this.emit('log', { stream: 'stdout', text: 'Added ' + added.length + ' new Good Flip lead(s) to the Outreach Review tab for review.\n' });
+      this.emit('log', { stream: 'stdout', text: 'Added ' + added.length + ' new Good Flip lead(s) to the Outreach Review tab.\n' });
     });
 
-    await this._runStep('Auto-queue from Flip Scout Leads', async () => {
+    await this._runStep('Auto-queue Good Flip leads', async () => {
       const { added } = await outreachActions.autoQueueFromFlipScout();
-      this.emit('log', { stream: 'stdout', text: 'Auto-queued ' + added.length + ' new lead(s) from Flip Scout Leads.\n' });
+      this.emit('log', { stream: 'stdout', text: 'Auto-queued ' + added.length + ' new Good Flip lead(s).\n' });
     });
 
-    await this._runStep('Sync Outreach Review decisions', async () => {
-      const { updated } = await outreachActions.syncOutreachReviewDecisions();
-      this.emit('log', { stream: 'stdout', text: 'Pulled Outreach Review "Ready?" decisions into ' + updated + ' row(s).\n' });
-    });
-
-    await this._runStep('Refresh validation', async () => {
-      const results = await outreachActions.refreshValidation();
-      this.emit('log', { stream: 'stdout', text: 'Refreshed validation on ' + results.length + ' row(s).\n' });
-    });
-
-    await this._runStep('Submit for approval', async () => {
-      const results = await outreachActions.submitForApproval();
-      this.emit('log', { stream: 'stdout', text: 'Submitted ' + results.length + ' row(s) for approval.\n' });
-    });
-
-    await this._runStep('Approve outreach', async () => {
-      const results = await outreachActions.approveOutreach();
-      this.emit('log', { stream: 'stdout', text: 'Approved ' + results.length + ' row(s).\n' });
-    });
-
+    // Fill agent contact + compliance flags BEFORE the pipeline resolves contacts.
     await this._runJobStep('reiblackbook-enrich', 'Enrich agent contacts (REI BlackBook)');
     await this._runJobStep('reiblackbook-check-notes', 'Check REI BlackBook notes for do-not-automate flags');
-    await this._runJobStep('reiblackbook-check-replies', 'Check for replies (REI BlackBook)');
-    await this._runJobStep('reiblackbook-autosend', 'Auto-send texts via REI BlackBook');
 
-    await this._runStep('Send approved emails', async () => {
-      const { sendingEnabled, results } = await outreachActions.sendApprovedEmails();
+    await this._runStep('Process Good Flip leads (find contact, validate, send, log)', async () => {
+      const { sendingEnabled, results } = await outreachActions.runGoodFlipPipeline();
+      const sent = results.filter((r) => r.result === 'Sent').length;
+      const research = results.filter((r) => /Assisted Research/i.test(r.result)).length;
+      const dup = results.filter((r) => /Duplicate/i.test(r.result)).length;
       this.emit('log', {
         stream: 'stdout',
-        text: (sendingEnabled ? 'Email sending is ON -- ' : 'Email sending is OFF (dry run) -- ') + results.length + ' row(s) processed.\n'
+        text: 'Good Flip pipeline: ' + results.length + ' lead(s) -- ' + sent + ' sent, ' + dup + ' duplicate-blocked, ' +
+          research + ' need research. Email sending ' + (sendingEnabled.email ? 'ON' : 'OFF (kill switch)') + '.\n'
       });
     });
+
+    await this._runJobStep('reiblackbook-check-replies', 'Check for replies (REI BlackBook)');
+    await this._runJobStep('reiblackbook-autosend', 'Auto-send texts via REI BlackBook');
 
     // Google Voice stays opt-in, matching the Automation tab's own
     // hide/show behavior -- only run these steps if the setting is on.

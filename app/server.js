@@ -251,7 +251,9 @@ const server = http.createServer(async (req, res) => {
   res.end('Not found');
 });
 
+const config = require('../src/config');
 server.listen(PORT, '127.0.0.1', () => {
+  console.log(config.startupReport());
   console.log('Outreach control panel running at http://127.0.0.1:' + PORT);
 });
 

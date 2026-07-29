@@ -20,6 +20,7 @@ const initialEmailTemplate = require('../../templates/initial-email.v2.json');
 const store = require('./store');
 const { getFlipScoutLeads, GOOD_FLIP_QUALITY, writeOutreachStatusSnapshot, getRedfinAgentContacts, getOutreachReviewRows, writeOutreachReviewDetails, syncGoodFlipToOutreachReview } = require('../sheets/sheetsClient');
 const { loadFeedAgentContacts } = require('../feed/flipScoutFeed');
+const goodFlipPipeline = require('./goodFlipPipeline');
 const gmailClient = require('../gmail/gmailClient');
 const { postToGoogleChat } = require('../notifications/googleChat');
 const { scrapeReiBlackBookContact, checkNotesForDoNotAutomate, getChatHistory, isInboundActivity, REI_PROFILE_DIR } = require('../reiblackbook/scrapeReiBlackBook');
@@ -1069,6 +1070,28 @@ async function getOutreachReviewSummary() {
   return summary;
 }
 
+/**
+ * Good Flip -> outreach, the Sheet-driven trigger with NO "Ready" gate.
+ * Computes the set of Good Flip addresses from the live Flip Scout Leads
+ * tab, hands the pipeline the feed contacts, and syncs the status tab.
+ * The pipeline (src/outreach/goodFlipPipeline.js) resolves each lead's
+ * contact through feed -> REI -> MLS -> enrichment -> human research,
+ * validates it, prevents duplicates, honors the kill switch, and records a
+ * recoverable status. Sending nothing unless a Good Flip lead has a valid
+ * contact and the channel's ENABLE_* flag is on.
+ */
+async function runGoodFlipPipeline() {
+  const leads = await listFlipScoutLeads();
+  const goodFlipAddresses = new Set(
+    leads.filter((l) => l.isGoodFlip).map((l) => normalizeAddress(l.address))
+  );
+  let feedMap = new Map();
+  try { feedMap = (await loadFeedAgentContacts()).contacts; } catch (err) { /* best-effort */ }
+  const outcome = await goodFlipPipeline.processGoodFlipLeads({ goodFlipAddresses, feedMap });
+  outcome.sheetSync = await syncOutreachStatusTab();
+  return outcome;
+}
+
 function listRows() {
   return store.getQueueRows().map((r) => ({
     id: r.id,
@@ -1091,6 +1114,7 @@ module.exports = {
   syncOutreachReviewDecisions,
   computeReviewDecisionFields,
   resolveAgentContact,
+  runGoodFlipPipeline,
   getOutreachReviewSummary,
   lookupRedfinAgentContact,
   enrichFromReiBlackBook,
