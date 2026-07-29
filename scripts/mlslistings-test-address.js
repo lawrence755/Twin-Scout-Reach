@@ -13,16 +13,17 @@ const { chromium } = require('playwright');
 const { scrapeListingAgent, MLS_PROFILE_DIR } = require('../src/mlslistings/scrapeMlsListings');
 
 async function main() {
-  const address = process.argv.slice(2).join(' ').trim();
+  const address = (process.argv[2] || '').trim();
+  const city = (process.argv[3] || '').trim();
   if (!address) {
-    console.error('Usage: node scripts/mlslistings-test-address.js "<address>"');
+    console.error('Usage: node scripts/mlslistings-test-address.js "<street address>" "[city]"');
     process.exit(1);
   }
   const context = await chromium.launchPersistentContext(MLS_PROFILE_DIR, { headless: false });
   try {
     const page = context.pages()[0] || (await context.newPage());
-    console.log('Searching MLSListings for: ' + address + '\n');
-    const info = await scrapeListingAgent(page, address);
+    console.log('Searching MLSListings for: ' + address + (city ? ', ' + city : '') + '\n');
+    const info = await scrapeListingAgent(page, address, city);
     console.log('=== Parsed agent contact ===');
     console.log(JSON.stringify(info, null, 2));
     if (!info.found) {

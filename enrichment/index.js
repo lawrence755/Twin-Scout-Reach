@@ -44,7 +44,7 @@ async function main() {
     for (const row of rows) {
       console.log('\n- ' + row.address);
       try {
-        const found = await searchAndExtract(page, row.address);
+        const found = await searchAndExtract(page, row.address, row.city);
         if (!found.found || (!found.phone && !found.email)) {
           console.warn('  no agent contact found on MLSListings');
           summary.failed++;

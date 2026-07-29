@@ -1,6 +1,6 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { extractAgentContact, looksLoggedOut } = require('../src/mlslistings/scrapeMlsListings');
+const { extractAgentContact, looksLoggedOut, parseAddressParts } = require('../src/mlslistings/scrapeMlsListings');
 
 // extractAgentContact is the pure, text-pattern part of the MLSListings
 // enricher -- it turns a listing detail page's visible text into the
@@ -49,6 +49,29 @@ describe('extractAgentContact', () => {
     const text = 'Listing Agent\n(408) 555-1234\nagent@x.com';
     const out = extractAgentContact(text);
     assert.notEqual(out.agentName, 'Listing Agent');
+  });
+});
+
+describe('parseAddressParts (feeds the Matrix address form)', () => {
+  test('street number + name from a plain address, city passed separately', () => {
+    assert.deepEqual(parseAddressParts('807 Teresita Blvd', 'San Francisco'),
+      { streetNumber: '807', streetName: 'Teresita', city: 'San Francisco', zip: '', beds: '', baths: '', sqft: '' });
+  });
+
+  test('pulls zip and drops city/state from a full address string', () => {
+    const p = parseAddressParts('807 Teresita Blvd, San Francisco, CA 94127');
+    assert.equal(p.streetNumber, '807');
+    // Street suffix (Blvd/Ave/etc.) is stripped -- Matrix's "Street Name"
+    // field does a starts-with match on the base name only.
+    assert.equal(p.streetName, 'Teresita');
+    assert.equal(p.zip, '94127');
+  });
+
+  test('strips line breaks (the dirty-data case)', () => {
+    const p = parseAddressParts('100 Palm Avenue \n', 'San Carlos');
+    assert.equal(p.streetNumber, '100');
+    assert.equal(p.streetName, 'Palm');
+    assert.equal(p.city, 'San Carlos');
   });
 });
 

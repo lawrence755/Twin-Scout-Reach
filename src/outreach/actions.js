@@ -501,9 +501,9 @@ async function enrichFromMlsListings() {
     const page = context.pages()[0] || (await context.newPage());
     for (const row of rows) {
       try {
-        const info = await scrapeListingAgent(page, row.propertyAddress);
+        const info = await scrapeListingAgent(page, row.propertyAddress, row.city);
         if (!info.found || (!info.agentPhone && !info.agentEmail)) {
-          results.push({ propertyAddress: row.propertyAddress, ok: false, error: info.found ? 'listing found but no agent contact parsed' : 'no matching listing found' });
+          results.push({ propertyAddress: row.propertyAddress, ok: false, error: info.reason || (info.found ? 'listing found but no agent contact parsed' : 'no matching listing found') });
         } else {
           // Through updateRow() (not a direct store write) so a changed
           // agent phone recomputes outreachKey/contactKey -- same reason

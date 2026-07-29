@@ -99,10 +99,12 @@ const config = {
   // and are never required. Never commit real values -- .env only.
   mls: {
     dashboardUrl: process.env.MLS_DASHBOARD_URL || 'https://prodashboard.mlslistings.com/',
-    // The Matrix search app itself -- once logged in we can go straight
-    // here to search by address, skipping the dashboard "Matrix Search"
-    // popup handoff.
-    searchUrl: process.env.MLS_SEARCH_URL || 'https://search.mlslistings.com/Matrix/Default.aspx',
+    // The Matrix address-search FORM (captured from the live recording).
+    // Once logged in we go straight here and fill Street Number / Street
+    // Name / City / Zip. The ?c= token selects the address-search form; if
+    // MLSListings ever changes it, override MLS_SEARCH_URL in .env with a
+    // fresh URL copied from the browser.
+    searchUrl: process.env.MLS_SEARCH_URL || 'https://search.mlslistings.com/Matrix/Default.aspx?c=H4sIAAAAAAAEAItWMjExMVbSySvNyRklqEEopceUGhgYmh1eFIIerLEAUnk2lm4BAAA)&f=',
     username: process.env.MLS_USERNAME || '',
     password: process.env.MLS_PASSWORD || '',
     scrapeDelayMs: Number(process.env.MLS_SCRAPE_DELAY_MS || 5000)

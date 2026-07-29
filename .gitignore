@@ -14,6 +14,7 @@ gmail-token-*.json
 .reiblackbook-profile/
 .mlslistings-profile/
 enrichment/captures/
+.mls-debug/
 dist/
 data/*.json
 data/_backup_*/

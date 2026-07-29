@@ -15,8 +15,8 @@ const { scrapeListingAgent } = require('../src/mlslistings/scrapeMlsListings');
  * @param {string} address                  street address to search for
  * @returns {Promise<{ found: boolean, name: string, phone: string, email: string }>}
  */
-async function searchAndExtract(page, address) {
-  const result = await scrapeListingAgent(page, address);
+async function searchAndExtract(page, address, city) {
+  const result = await scrapeListingAgent(page, address, city);
   return {
     found: result.found,
     name: result.agentName || '',
